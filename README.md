@@ -15,7 +15,7 @@ A CLI tool that integrates Claude Code hooks with the ntfy notification service,
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/claude-code-ntfy-service.git
+git clone https://github.com/pppobear/claude-code-ntfy-service.git
 cd claude-code-ntfy-service
 
 # Build the project
