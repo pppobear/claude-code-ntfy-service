@@ -1,35 +1,56 @@
 use anyhow::{Context, Result};
-use flume::{Receiver, Sender};
-use serde::{Deserialize, Serialize};
+use flume::Receiver;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{atomic::{AtomicUsize, Ordering}, Arc};
 use tokio::signal;
 use tokio::time::{sleep, Duration};
 use tracing::{debug, error, info, warn};
 
+// Since this is a separate binary, we need to include modules directly
 mod config;
 mod ntfy;
 mod templates;
+mod clients;
+
+// Local daemon modules  
+mod ipc;
+mod shared;
 
 use config::ConfigManager;
-use ntfy::{AsyncNtfyClient, NtfyMessage};
+use ntfy::NtfyMessage;
+use clients::{create_async_client_from_ntfy_config, traits::NotificationClient};
 use templates::{MessageFormatter, TemplateEngine};
+use ipc::IpcServer;
+use shared::NotificationTask;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct NotificationTask {
-    pub hook_name: String,
-    pub hook_data: serde_json::Value,
-    pub retry_count: u32,
-    pub timestamp: chrono::DateTime<chrono::Local>,
+/// Auto-detect project path by looking for .claude/ntfy-service/config.toml
+fn resolve_project_path(project_path: Option<PathBuf>) -> Option<PathBuf> {
+    if let Some(path) = project_path {
+        return Some(path);
+    }
+    
+    // Check if current directory has .claude/ntfy-service/config.toml
+    if let Ok(current_dir) = std::env::current_dir() {
+        let config_path = current_dir.join(".claude").join("ntfy-service").join("config.toml");
+        if config_path.exists() {
+            return Some(current_dir);
+        }
+    }
+    
+    // No project config found, use global config
+    None
 }
+
+// NotificationTask is now imported from shared module
 
 pub struct NotificationDaemon {
     config_manager: Arc<ConfigManager>,
-    ntfy_client: Arc<AsyncNtfyClient>,
+    ntfy_client: Arc<clients::AsyncNtfyClient>,
     template_engine: Arc<TemplateEngine>,
     message_formatter: Arc<MessageFormatter>,
     task_receiver: Receiver<NotificationTask>,
     shutdown_receiver: Receiver<()>,
+    queue_size: Arc<AtomicUsize>,
     max_retries: u32,
     retry_delay: Duration,
 }
@@ -39,16 +60,12 @@ impl NotificationDaemon {
         project_path: Option<PathBuf>,
         task_receiver: Receiver<NotificationTask>,
         shutdown_receiver: Receiver<()>,
+        queue_size: Arc<AtomicUsize>,
     ) -> Result<Self> {
         let config_manager = Arc::new(ConfigManager::new(project_path)?);
         let config = config_manager.config().clone();
 
-        let ntfy_client = Arc::new(AsyncNtfyClient::new(
-            config.ntfy.server_url.clone(),
-            config.ntfy.auth_token.clone(),
-            config.ntfy.timeout_secs,
-            config.ntfy.send_format.clone(),
-        )?);
+        let ntfy_client = Arc::new(create_async_client_from_ntfy_config(&config.ntfy)?);
 
         let template_engine = Arc::new(TemplateEngine::new()?);
         let message_formatter = Arc::new(MessageFormatter::default());
@@ -60,6 +77,7 @@ impl NotificationDaemon {
             message_formatter,
             task_receiver,
             shutdown_receiver,
+            queue_size,
             max_retries: config.daemon.retry_attempts,
             retry_delay: Duration::from_secs(config.daemon.retry_delay_secs),
         })
@@ -103,16 +121,32 @@ impl NotificationDaemon {
     }
 
     async fn receive_task(&self) -> Option<NotificationTask> {
-        self.task_receiver.recv_async().await.ok()
+        match self.task_receiver.recv_async().await.ok() {
+            Some(task) => {
+                // Decrement queue size when task is dequeued
+                self.queue_size.fetch_sub(1, Ordering::Relaxed);
+                Some(task)
+            }
+            None => None,
+        }
     }
 
     async fn process_task(&self, task: NotificationTask) {
         debug!("Processing notification task: {}", task.hook_name);
 
+        // Deserialize hook data from JSON string
+        let hook_data: serde_json::Value = match serde_json::from_str(&task.hook_data) {
+            Ok(data) => data,
+            Err(e) => {
+                error!("Failed to deserialize hook data: {}", e);
+                return;
+            }
+        };
+
         // Check if hook should be processed
         if !self
             .config_manager
-            .should_process_hook(&task.hook_name, &task.hook_data)
+            .should_process_hook(&task.hook_name, &hook_data)
         {
             debug!("Hook {} filtered out, skipping", task.hook_name);
             return;
@@ -165,11 +199,15 @@ impl NotificationDaemon {
     async fn prepare_message(&self, task: &NotificationTask) -> Result<NtfyMessage> {
         let config = self.config_manager.config();
 
+        // Deserialize hook data from JSON string
+        let hook_data: serde_json::Value = serde_json::from_str(&task.hook_data)
+            .context("Failed to deserialize hook data for message preparation")?;
+
         // Get template name and render message body
         let template_name = task.hook_name.replace('_', "-");
         let formatted_data = self
             .template_engine
-            .format_hook_data(&task.hook_name, &task.hook_data);
+            .format_hook_data(&task.hook_name, &hook_data);
 
         let body = if config.templates.use_custom {
             if let Some(custom_template) = config.templates.custom_templates.get(&task.hook_name) {
@@ -238,31 +276,14 @@ impl NotificationDaemon {
         info!("Draining remaining notification queue");
 
         while let Ok(task) = self.task_receiver.try_recv() {
+            // Decrement queue size when task is dequeued during drain
+            self.queue_size.fetch_sub(1, Ordering::Relaxed);
             self.process_task(task).await;
         }
     }
 }
 
-// IPC message for communication between CLI and daemon
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum DaemonMessage {
-    Submit(NotificationTask),
-    Ping,
-    Shutdown,
-    Reload,
-    Status,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum DaemonResponse {
-    Ok,
-    Error(String),
-    Status {
-        queue_size: usize,
-        is_running: bool,
-        uptime_secs: u64,
-    },
-}
+// DaemonMessage and DaemonResponse are now imported from shared module
 
 // Main entry point for the daemon
 #[tokio::main]
@@ -289,11 +310,14 @@ async fn main() -> Result<()> {
         i += 1;
     }
     
+    // Auto-detect project path if not provided
+    let resolved_project_path = resolve_project_path(project_path);
+    
     // Check for existing daemon before starting
-    check_existing_daemon(project_path.as_ref())?;
+    check_existing_daemon(resolved_project_path.as_ref())?;
 
     // Load configuration to check for log path
-    let config_manager = Arc::new(ConfigManager::new(project_path.clone())?);
+    let config_manager = Arc::new(ConfigManager::new(resolved_project_path.clone())?);
     let config = config_manager.config().clone();
 
     // Initialize tracing with appropriate logging based on mode and configuration
@@ -375,108 +399,72 @@ async fn main() -> Result<()> {
     let (task_sender, task_receiver) = flume::unbounded::<NotificationTask>();
     let (shutdown_sender, shutdown_receiver) = flume::bounded::<()>(1);
 
+    // Create shared queue size counter
+    let queue_size = Arc::new(AtomicUsize::new(0));
+
     // Store sender for IPC server
     let task_sender_clone = task_sender.clone();
     let shutdown_sender_clone = shutdown_sender.clone();
-    let socket_path = create_socket_path(project_path.as_ref())?;
+    let queue_size_clone = queue_size.clone();
+    let socket_path = ipc::create_socket_path(resolved_project_path.as_ref())?;
+    let socket_path_for_ipc = socket_path.clone();
 
-    // Start IPC server in background
+    // Create IPC server shutdown channel
+    let (ipc_shutdown_tx, ipc_shutdown_rx) = tokio::sync::mpsc::channel::<()>(1);
+
+    // Start high-performance IPC server in background
     let ipc_handle = tokio::spawn(async move {
-        if let Err(e) = run_ipc_server(socket_path, task_sender_clone, shutdown_sender_clone).await
-        {
-            error!("IPC server error: {}", e);
+        match IpcServer::new(socket_path_for_ipc, task_sender_clone, shutdown_sender_clone, queue_size_clone).await {
+            Ok(mut server) => {
+                // Add IPC shutdown receiver to server
+                server.set_shutdown_receiver(ipc_shutdown_rx);
+                if let Err(e) = server.run().await {
+                    error!("IPC server error: {}", e);
+                }
+            }
+            Err(e) => {
+                error!("Failed to create IPC server: {}", e);
+            }
         }
     });
 
+    // Create PID file for daemon status tracking
+    let pid_file = socket_path.with_extension("pid");
+    let current_pid = std::process::id();
+    std::fs::write(&pid_file, current_pid.to_string())
+        .context("Failed to create PID file")?;
+    info!("Daemon started with PID: {} (PID file: {:?})", current_pid, pid_file);
+
     // Create and run daemon
-    let daemon = NotificationDaemon::new(project_path.clone(), task_receiver, shutdown_receiver)?;
+    let daemon = NotificationDaemon::new(resolved_project_path.clone(), task_receiver, shutdown_receiver, queue_size)?;
     let daemon_result = daemon.run().await;
+
+    // Send shutdown signal to IPC server
+    if let Err(e) = ipc_shutdown_tx.send(()).await {
+        warn!("Failed to send shutdown signal to IPC server: {}", e);
+    } else {
+        info!("Sent shutdown signal to IPC server");
+    }
 
     // Wait for IPC server to finish
     let _ = ipc_handle.await;
 
+    // Clean up PID file on shutdown
+    if pid_file.exists() {
+        if let Err(e) = std::fs::remove_file(&pid_file) {
+            warn!("Failed to remove PID file during shutdown: {}", e);
+        } else {
+            info!("Removed PID file during shutdown");
+        }
+    }
+
     daemon_result
 }
 
-// Simplified IPC server (in production, use proper Unix socket or named pipe)
-async fn run_ipc_server(
-    socket_path: PathBuf,
-    task_sender: Sender<NotificationTask>,
-    shutdown_sender: Sender<()>,
-) -> Result<()> {
-    // For now, we'll use a simple file-based approach
-    // In production, implement proper Unix socket or named pipe communication
+// Legacy file-based IPC server has been replaced with high-performance Unix socket IPC
+// This function is no longer used but kept for compatibility during transition
 
-    info!("IPC server listening on {:?}", socket_path);
-
-    // Clean up any leftover command files from previous sessions
-    let cmd_file = socket_path.with_extension("cmd");
-    if cmd_file.exists() {
-        if let Err(e) = std::fs::remove_file(&cmd_file) {
-            warn!("Failed to clean up leftover command file: {}", e);
-        } else {
-            info!("Cleaned up leftover command file from previous session");
-        }
-    }
-
-    // Create a marker file to indicate daemon is running
-    let marker_file = socket_path.with_extension("pid");
-    std::fs::write(&marker_file, std::process::id().to_string())
-        .context("Failed to write PID file")?;
-
-    // Clean up on exit
-    let cmd_file_clone = cmd_file.clone();
-    let _guard = scopeguard::guard((marker_file, cmd_file_clone), |(pid_file, cmd_file)| {
-        let _ = std::fs::remove_file(pid_file);
-        let _ = std::fs::remove_file(cmd_file);
-    });
-
-    // Keep the server running
-    loop {
-        tokio::time::sleep(Duration::from_millis(100)).await;
-
-        // Check for command file (simplified IPC)
-        let cmd_file = socket_path.with_extension("cmd");
-        if cmd_file.exists() {
-            if let Ok(content) = std::fs::read_to_string(&cmd_file) {
-                if let Ok(msg) = serde_json::from_str::<DaemonMessage>(&content) {
-                    match msg {
-                        DaemonMessage::Submit(task) => {
-                            let _ = task_sender.send_async(task).await;
-                        }
-                        DaemonMessage::Shutdown => {
-                            info!("Received shutdown command via IPC");
-                            let _ = shutdown_sender.send_async(()).await;
-                            break;
-                        }
-                        DaemonMessage::Reload => {
-                            info!("Received reload command (not implemented yet)");
-                        }
-                        _ => {
-                            debug!("Received other IPC message: {:?}", msg);
-                        }
-                    }
-                }
-                let _ = std::fs::remove_file(&cmd_file);
-            }
-        }
-    }
-
-    Ok(())
-}
-
-pub fn create_socket_path(project_path: Option<&PathBuf>) -> Result<PathBuf> {
-    let base_path = if let Some(path) = project_path {
-        path.join(".claude").join("ntfy-service")
-    } else {
-        let base_dirs = directories::BaseDirs::new().context("Failed to get base directories")?;
-        base_dirs.home_dir().join(".claude").join("ntfy-service")
-    };
-
-    std::fs::create_dir_all(&base_path).context("Failed to create socket directory")?;
-
-    Ok(base_path.join("daemon.sock"))
-}
+// create_socket_path is now provided by the ipc module
 
 fn is_process_running(pid: u32) -> bool {
     #[cfg(unix)]
@@ -510,7 +498,7 @@ fn is_process_running(pid: u32) -> bool {
 }
 
 fn check_existing_daemon(project_path: Option<&PathBuf>) -> Result<()> {
-    let socket_path = create_socket_path(project_path)?;
+    let socket_path = ipc::create_socket_path(project_path)?;
     let pid_file = socket_path.with_extension("pid");
     
     if !pid_file.exists() {

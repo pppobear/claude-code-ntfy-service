@@ -51,9 +51,12 @@ cargo install --path .
 ./target/debug/claude-ntfy test "Hello World" --title "Test"
 
 # Test daemon functionality
-./target/debug/claude-ntfy daemon start
-./target/debug/claude-ntfy daemon status
-./target/debug/claude-ntfy daemon stop
+./target/debug/claude-ntfy daemon start -d    # Background mode (detached)
+./target/debug/claude-ntfy daemon status      # Check daemon status
+./target/debug/claude-ntfy daemon stop        # Stop daemon
+
+# Test daemon in foreground mode (for development/debugging)
+timeout 10s ./target/debug/claude-ntfy daemon start  # Limited time foreground
 ```
 
 ### Hook Testing
@@ -74,7 +77,6 @@ echo '{"tool_name": "Write", "file_path": "/tmp/test.txt"}' | CLAUDE_HOOK=PreToo
 ├── config.toml          # Main configuration
 ├── daemon.sock          # IPC socket (when daemon running)  
 ├── daemon.pid           # Daemon process ID
-├── daemon.cmd           # Daemon command file
 └── daemon.log           # Daemon logs
 ```
 
@@ -138,10 +140,11 @@ The tool uses these Claude Code environment variables:
 ## Implementation Details
 
 ### Daemon Architecture
-- Uses tokio async runtime with graceful shutdown
-- IPC via filesystem (command files) rather than sockets for portability
+- Uses tokio async runtime with graceful shutdown  
+- IPC via Unix sockets for high-performance communication
 - Retry logic with exponential backoff for failed notifications
 - Automatic PID file management and process monitoring
+- Graceful signal handling (SIGINT/SIGTERM) for clean shutdown
 
 ### Hook Data Processing
 - Enhances PostToolUse data to ensure `tool_response.success` field exists
@@ -162,3 +165,62 @@ The tool uses these Claude Code environment variables:
 - Integration tests using `assert_cmd` for CLI testing
 - Tests cover initialization, configuration, hook processing
 - Dry-run mode for testing without sending notifications
+
+## Claude Code Development Testing
+
+### 🚨 Important: Testing Daemon with Bash Tool
+
+When testing daemon functionality in Claude Code environment, use these methods to avoid blocking:
+
+#### ✅ **Correct Methods (Won't Block)**
+
+**1. Use `run_in_background` parameter (Recommended)**
+```bash
+# This starts daemon asynchronously and returns immediately
+Bash(command: "./target/debug/claude-ntfy daemon start", run_in_background: true)
+# Then monitor with: BashOutput(bash_id: "bash_X")
+```
+
+**2. Use detached mode**
+```bash
+# Daemon runs in true background mode
+Bash(command: "./target/debug/claude-ntfy daemon start -d")
+```
+
+**3. Use timeout for foreground testing**
+```bash
+# Limited time foreground run (simulates Ctrl+C)
+Bash(command: "timeout 5s ./target/debug/claude-ntfy daemon start")
+```
+
+#### ❌ **Incorrect Methods (Will Block)**
+
+```bash
+# This will hang Claude Code - DON'T USE
+Bash(command: "./target/debug/claude-ntfy daemon start &")
+```
+
+**Why it blocks:** Shell `&` doesn't make Bash tool async. The tool waits for output from foreground daemon, causing indefinite blocking.
+
+### Signal Testing
+```bash
+# Test graceful shutdown
+kill -INT <daemon_pid>    # Sends SIGINT (Ctrl+C equivalent)
+kill -TERM <daemon_pid>   # Sends SIGTERM  
+
+# Verify clean exit
+ps aux | grep claude-ntfy | grep -v grep  # Should show no processes
+./target/debug/claude-ntfy daemon status  # Should show "not running"
+```
+
+### Expected Shutdown Sequence
+```
+Received Ctrl+C signal, stopping daemon
+Draining remaining notification queue  
+Notification daemon stopped
+Sent shutdown signal to IPC server
+IPC server received external shutdown signal
+IPC server stopped
+Removed PID file during shutdown
+Daemon exited successfully
+```

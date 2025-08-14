@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::time::Duration;
 use url::Url;
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct NtfyMessage {
     pub topic: String,
     pub title: Option<String>,

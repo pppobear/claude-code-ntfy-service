@@ -18,7 +18,7 @@ A Rust CLI tool that integrates Claude Code hooks with the ntfy notification ser
 - **`claude-ntfy`**: Main CLI tool for configuration, testing, and daemon management
 - **`claude-ntfy-daemon`**: Background daemon process for async notification processing
 
-**Communication**: File-based IPC system using command files and PID management for cross-platform compatibility.
+**Communication**: Unix socket IPC system with binary serialization for high-performance communication.
 
 ## Installation
 
@@ -408,8 +408,7 @@ send_format = "text"    # Default - uses HTTP headers, better compatibility
 
 ### Process Management
 - **PID Files**: `.claude/ntfy-service/daemon.pid` 
-- **Command Files**: `.claude/ntfy-service/daemon.cmd` (IPC communication)
-- **Socket Files**: `.claude/ntfy-service/daemon.sock` (path reference)
+- **Socket Files**: `.claude/ntfy-service/daemon.sock` (Unix socket IPC)
 
 ### Logging Options
 ```bash
@@ -426,10 +425,10 @@ claude-ntfy daemon start
 ```
 
 ### IPC Communication
-The daemon uses a simplified file-based IPC system for cross-platform compatibility:
-1. CLI writes command JSON to `.claude/ntfy-service/daemon.cmd`
-2. Daemon polls for command files every 100ms
-3. Commands are processed and files cleaned up
+The daemon uses Unix socket IPC for high-performance communication:
+1. CLI connects to Unix socket at `.claude/ntfy-service/daemon.sock`
+2. Messages are serialized using bincode for efficiency
+3. Bidirectional communication with length-prefixed protocol
 4. Supports: Submit, Shutdown, Reload, Status, Ping
 
 ## Troubleshooting

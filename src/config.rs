@@ -1,10 +1,14 @@
-use anyhow::{Context, Result};
+use crate::errors::{AppError, AppResult};
 use directories::BaseDirs;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+/// Main configuration structure for the Claude Code Ntfy Service
+///
+/// Contains all configuration sections including ntfy server settings,
+/// hook processing configuration, template settings, and daemon options.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     pub ntfy: NtfyConfig,
@@ -13,6 +17,9 @@ pub struct Config {
     pub daemon: DaemonConfig,
 }
 
+/// Configuration for ntfy notification service integration
+///
+/// Contains settings for connecting to and sending notifications via ntfy servers.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NtfyConfig {
     pub server_url: String,
@@ -86,6 +93,30 @@ impl Default for Config {
     }
 }
 
+/// Configuration manager for the Claude Code Ntfy Service
+///
+/// Handles loading, saving, and managing configuration for both project-level
+/// and global configurations. Project configurations take precedence over global ones.
+///
+/// # Configuration Hierarchy
+/// 
+/// 1. **Project-level**: `.claude/ntfy-service/config.toml` in project root
+/// 2. **Global**: `~/.claude/ntfy-service/config.toml` in user home directory
+///
+/// # Example
+///
+/// ```rust
+/// use claude_ntfy::config::ConfigManager;
+/// use std::path::PathBuf;
+///
+/// // Load project-specific configuration
+/// let config_manager = ConfigManager::new(Some(PathBuf::from("/path/to/project")))?;
+/// 
+/// // Access configuration
+/// let ntfy_config = &config_manager.config().ntfy;
+/// println!("Server URL: {}", ntfy_config.server_url);
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
 pub struct ConfigManager {
     #[allow(dead_code)]
     config_path: PathBuf,
@@ -93,7 +124,27 @@ pub struct ConfigManager {
 }
 
 impl ConfigManager {
-    pub fn new(project_path: Option<PathBuf>) -> Result<Self> {
+    /// Creates a new ConfigManager instance
+    ///
+    /// Loads configuration from the appropriate location based on the project path.
+    /// If a project path is provided, looks for project-level configuration first,
+    /// falling back to global configuration if not found.
+    ///
+    /// # Arguments
+    ///
+    /// * `project_path` - Optional path to the project root. If `None`, uses global config.
+    ///
+    /// # Returns
+    ///
+    /// Returns a `ConfigManager` instance or an error if configuration loading fails.
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if:
+    /// - The configuration directory cannot be created
+    /// - The configuration file cannot be read or parsed
+    /// - Default configuration cannot be serialized and written
+    pub fn new(project_path: Option<PathBuf>) -> AppResult<Self> {
         let config_path = Self::get_config_path(project_path)?;
         let config = Self::load_or_create(&config_path)?;
 
@@ -103,57 +154,110 @@ impl ConfigManager {
         })
     }
 
-    fn get_config_path(project_path: Option<PathBuf>) -> Result<PathBuf> {
+    fn get_config_path(project_path: Option<PathBuf>) -> AppResult<PathBuf> {
         let base_path = if let Some(path) = project_path {
             // Project-level configuration
             path.join(".claude").join("ntfy-service")
         } else {
             // Global configuration
-            let base_dirs = BaseDirs::new().context("Failed to get base directories")?;
+            let base_dirs = BaseDirs::new().ok_or_else(|| AppError::config("Failed to get base directories"))?;
             base_dirs.home_dir().join(".claude").join("ntfy-service")
         };
 
         // Ensure directory exists
-        fs::create_dir_all(&base_path).context("Failed to create config directory")?;
+        fs::create_dir_all(&base_path)
+            .map_err(|e| AppError::io_with_source(&base_path, "create config directory", e))?;
 
         Ok(base_path.join("config.toml"))
     }
 
-    fn load_or_create(path: &Path) -> Result<Config> {
+    fn load_or_create(path: &Path) -> AppResult<Config> {
         if path.exists() {
-            let content = fs::read_to_string(path).context("Failed to read config file")?;
-            toml::from_str(&content).context("Failed to parse config file")
+            let content = fs::read_to_string(path)
+                .map_err(|e| AppError::io_with_source(path, "read config file", e))?;
+            toml::from_str(&content)
+                .map_err(|e| AppError::config_with_source("Failed to parse config file", e))
         } else {
             let config = Config::default();
-            let content =
-                toml::to_string_pretty(&config).context("Failed to serialize default config")?;
-            fs::write(path, content).context("Failed to write default config")?;
+            let content = toml::to_string_pretty(&config)
+                .map_err(|e| AppError::config_with_source("Failed to serialize default config", e))?;
+            fs::write(path, content)
+                .map_err(|e| AppError::io_with_source(path, "write default config", e))?;
             Ok(config)
         }
     }
 
+    /// Saves the current configuration to disk
+    ///
+    /// Writes the configuration back to the TOML file it was loaded from.
+    /// This method is useful for persisting changes made to the configuration.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - The configuration cannot be serialized to TOML
+    /// - The file cannot be written to disk
     #[allow(dead_code)]
-    pub fn save(&self) -> Result<()> {
-        let content = toml::to_string_pretty(&self.config).context("Failed to serialize config")?;
-        fs::write(&self.config_path, content).context("Failed to write config file")?;
+    pub fn save(&self) -> AppResult<()> {
+        let content = toml::to_string_pretty(&self.config)
+            .map_err(|e| AppError::config_with_source("Failed to serialize config", e))?;
+        fs::write(&self.config_path, content)
+            .map_err(|e| AppError::io_with_source(&self.config_path, "write config file", e))?;
         Ok(())
     }
 
+    /// Returns an immutable reference to the configuration
+    ///
+    /// Provides read-only access to the loaded configuration.
+    /// Use this method to access configuration values without modifying them.
+    ///
+    /// # Returns
+    ///
+    /// A reference to the `Config` struct containing all configuration data.
     pub fn config(&self) -> &Config {
         &self.config
     }
 
+    /// Returns a mutable reference to the configuration
+    ///
+    /// Provides write access to the configuration for making changes.
+    /// After modifying the configuration, call [`save()`](Self::save) to persist changes.
+    ///
+    /// # Returns
+    ///
+    /// A mutable reference to the `Config` struct.
     #[allow(dead_code)]
     pub fn config_mut(&mut self) -> &mut Config {
         &mut self.config
     }
 
+    /// Reloads the configuration from disk
+    ///
+    /// Discards any in-memory changes and reloads the configuration from
+    /// the original file path. This is useful for picking up external
+    /// changes to the configuration file.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the configuration file cannot be read or parsed.
     #[allow(dead_code)]
-    pub fn reload(&mut self) -> Result<()> {
+    pub fn reload(&mut self) -> AppResult<()> {
         self.config = Self::load_or_create(&self.config_path)?;
         Ok(())
     }
 
+    /// Gets the ntfy topic for a specific hook
+    ///
+    /// Returns the configured topic for the given hook name. If no specific
+    /// topic is configured for the hook, returns the default topic.
+    ///
+    /// # Arguments
+    ///
+    /// * `hook_name` - The name of the hook (e.g., "PostToolUse", "PreToolUse")
+    ///
+    /// # Returns
+    ///
+    /// The topic string where notifications for this hook should be sent.
     pub fn get_hook_topic(&self, hook_name: &str) -> String {
         self.config
             .hooks
@@ -163,6 +267,18 @@ impl ConfigManager {
             .unwrap_or_else(|| self.config.ntfy.default_topic.clone())
     }
 
+    /// Gets the notification priority for a specific hook
+    ///
+    /// Returns the configured priority for the given hook name. If no specific
+    /// priority is configured for the hook, returns the default priority (3).
+    ///
+    /// # Arguments
+    ///
+    /// * `hook_name` - The name of the hook (e.g., "PostToolUse", "PreToolUse")
+    ///
+    /// # Returns
+    ///
+    /// Priority level (1-5, where 5 is highest priority).
     pub fn get_hook_priority(&self, hook_name: &str) -> u8 {
         self.config
             .hooks
@@ -172,6 +288,19 @@ impl ConfigManager {
             .unwrap_or_else(|| self.config.ntfy.default_priority.unwrap_or(3))
     }
 
+    /// Determines whether a hook should be processed based on configuration
+    ///
+    /// Checks if the hook is enabled and matches any configured filters.
+    /// This method is used to decide whether to send notifications for a given hook.
+    ///
+    /// # Arguments
+    ///
+    /// * `hook_name` - The name of the hook to check
+    /// * `hook_data` - The hook data to apply filters against
+    ///
+    /// # Returns
+    ///
+    /// `true` if the hook should be processed, `false` otherwise.
     pub fn should_process_hook(&self, hook_name: &str, hook_data: &serde_json::Value) -> bool {
         if !self.config.hooks.enabled {
             return false;
@@ -195,5 +324,127 @@ impl ConfigManager {
         }
 
         true
+    }
+}
+
+impl Config {
+    /// Validates the configuration and returns helpful error messages
+    ///
+    /// Checks all configuration values for correctness and provides
+    /// detailed error messages to help users fix any issues.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` if the configuration is valid, or an `AppError`
+    /// with specific details about what needs to be fixed.
+    pub fn validate(&self) -> AppResult<()> {
+        // Validate ntfy configuration
+        self.ntfy.validate().map_err(|e| {
+            AppError::config_with_source("Invalid ntfy configuration", e)
+        })?;
+
+        // Validate hook configuration
+        self.hooks.validate().map_err(|e| {
+            AppError::config_with_source("Invalid hooks configuration", e)
+        })?;
+
+        // Validate daemon configuration
+        self.daemon.validate().map_err(|e| {
+            AppError::config_with_source("Invalid daemon configuration", e)
+        })?;
+
+        Ok(())
+    }
+}
+
+impl NtfyConfig {
+    /// Validates the ntfy configuration
+    pub fn validate(&self) -> AppResult<()> {
+        // Validate server URL
+        if self.server_url.is_empty() {
+            return Err(AppError::config("server_url cannot be empty"));
+        }
+
+        if !self.server_url.starts_with("http://") && !self.server_url.starts_with("https://") {
+            return Err(AppError::config("server_url must start with http:// or https://"));
+        }
+
+        // Validate default topic
+        if self.default_topic.is_empty() {
+            return Err(AppError::config("default_topic cannot be empty"));
+        }
+
+        if self.default_topic.contains(' ') {
+            return Err(AppError::config("default_topic cannot contain spaces"));
+        }
+
+        // Validate priority if set
+        if let Some(priority) = self.default_priority {
+            if priority < 1 || priority > 5 {
+                return Err(AppError::config("default_priority must be between 1 and 5"));
+            }
+        }
+
+        // Validate send format
+        if !["text", "json"].contains(&self.send_format.as_str()) {
+            return Err(AppError::config("send_format must be either 'text' or 'json'"));
+        }
+
+        Ok(())
+    }
+}
+
+impl HookConfig {
+    /// Validates the hook configuration
+    pub fn validate(&self) -> AppResult<()> {
+        // Validate topic names
+        for (hook_name, topic) in &self.topics {
+            if topic.is_empty() {
+                return Err(AppError::config(format!("Topic for hook '{}' cannot be empty", hook_name)));
+            }
+            if topic.contains(' ') {
+                return Err(AppError::config(format!("Topic for hook '{}' cannot contain spaces", hook_name)));
+            }
+        }
+
+        // Validate priorities
+        for (hook_name, &priority) in &self.priorities {
+            if priority < 1 || priority > 5 {
+                return Err(AppError::config(format!("Priority for hook '{}' must be between 1 and 5", hook_name)));
+            }
+        }
+
+        Ok(())
+    }
+}
+
+impl DaemonConfig {
+    /// Validates the daemon configuration
+    pub fn validate(&self) -> AppResult<()> {
+        // Validate log level
+        let valid_levels = ["error", "warn", "info", "debug", "trace"];
+        if !valid_levels.contains(&self.log_level.as_str()) {
+            return Err(AppError::config(format!(
+                "log_level must be one of: {}",
+                valid_levels.join(", ")
+            )));
+        }
+
+        // Validate max queue size
+        if self.max_queue_size == 0 {
+            return Err(AppError::config("max_queue_size must be greater than 0"));
+        }
+
+        // Validate retry attempts
+        if self.retry_attempts > 10 {
+            return Err(AppError::config("retry_attempts should not exceed 10"));
+        }
+
+        // Validate retry delay
+        if self.retry_delay_secs == 0 {
+            return Err(AppError::config("retry_delay_secs must be greater than 0"));
+        }
+
+        Ok(())
     }
 }
