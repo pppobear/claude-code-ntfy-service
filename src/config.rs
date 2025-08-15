@@ -282,38 +282,6 @@ impl ConfigManager {
         &self.config
     }
 
-    /// Returns the path to the configuration file being used
-    ///
-    /// This method helps users understand which configuration file is actually
-    /// being used (project-level or global), especially when fallback logic is applied.
-    ///
-    /// # Returns
-    ///
-    /// A reference to the PathBuf containing the configuration file path.
-    pub fn config_path(&self) -> &PathBuf {
-        &self.config_path
-    }
-
-    /// Checks if the current configuration is project-level or global
-    ///
-    /// # Returns
-    ///
-    /// `true` if using project-level configuration, `false` if using global configuration.
-    pub fn is_project_config(&self) -> bool {
-        // Check if the path contains the home directory pattern for global config
-        let path_str = self.config_path.to_string_lossy();
-        
-        // If it's in the user's home directory .claude folder, it's global
-        if let Some(home_dir) = std::env::var("HOME").ok() {
-            let global_pattern = format!("{}/.claude/ntfy-service/config.toml", home_dir);
-            if path_str == global_pattern {
-                return false;
-            }
-        }
-        
-        // Otherwise it's a project config
-        true
-    }
 
     /// Returns a mutable reference to the configuration
     ///
@@ -424,124 +392,10 @@ impl ConfigManager {
     }
 }
 
-impl Config {
-    /// Validates the configuration and returns helpful error messages
-    ///
-    /// Checks all configuration values for correctness and provides
-    /// detailed error messages to help users fix any issues.
-    ///
-    /// # Returns
-    ///
-    /// Returns `Ok(())` if the configuration is valid, or an `AppError`
-    /// with specific details about what needs to be fixed.
-    pub fn validate(&self) -> AppResult<()> {
-        // Validate ntfy configuration
-        self.ntfy.validate().map_err(|e| {
-            AppError::config_with_source("Invalid ntfy configuration", e)
-        })?;
+// Removed unused Config::validate method
 
-        // Validate hook configuration
-        self.hooks.validate().map_err(|e| {
-            AppError::config_with_source("Invalid hooks configuration", e)
-        })?;
+// Removed unused NtfyConfig::validate method
 
-        // Validate daemon configuration
-        self.daemon.validate().map_err(|e| {
-            AppError::config_with_source("Invalid daemon configuration", e)
-        })?;
+// Removed unused HookConfig::validate method
 
-        Ok(())
-    }
-}
-
-impl NtfyConfig {
-    /// Validates the ntfy configuration
-    pub fn validate(&self) -> AppResult<()> {
-        // Validate server URL
-        if self.server_url.is_empty() {
-            return Err(AppError::config("server_url cannot be empty"));
-        }
-
-        if !self.server_url.starts_with("http://") && !self.server_url.starts_with("https://") {
-            return Err(AppError::config("server_url must start with http:// or https://"));
-        }
-
-        // Validate default topic
-        if self.default_topic.is_empty() {
-            return Err(AppError::config("default_topic cannot be empty"));
-        }
-
-        if self.default_topic.contains(' ') {
-            return Err(AppError::config("default_topic cannot contain spaces"));
-        }
-
-        // Validate priority if set
-        if let Some(priority) = self.default_priority {
-            if priority < 1 || priority > 5 {
-                return Err(AppError::config("default_priority must be between 1 and 5"));
-            }
-        }
-
-        // Validate send format
-        if !["text", "json"].contains(&self.send_format.as_str()) {
-            return Err(AppError::config("send_format must be either 'text' or 'json'"));
-        }
-
-        Ok(())
-    }
-}
-
-impl HookConfig {
-    /// Validates the hook configuration
-    pub fn validate(&self) -> AppResult<()> {
-        // Validate topic names
-        for (hook_name, topic) in &self.topics {
-            if topic.is_empty() {
-                return Err(AppError::config(format!("Topic for hook '{}' cannot be empty", hook_name)));
-            }
-            if topic.contains(' ') {
-                return Err(AppError::config(format!("Topic for hook '{}' cannot contain spaces", hook_name)));
-            }
-        }
-
-        // Validate priorities
-        for (hook_name, &priority) in &self.priorities {
-            if priority < 1 || priority > 5 {
-                return Err(AppError::config(format!("Priority for hook '{}' must be between 1 and 5", hook_name)));
-            }
-        }
-
-        Ok(())
-    }
-}
-
-impl DaemonConfig {
-    /// Validates the daemon configuration
-    pub fn validate(&self) -> AppResult<()> {
-        // Validate log level
-        let valid_levels = ["error", "warn", "info", "debug", "trace"];
-        if !valid_levels.contains(&self.log_level.as_str()) {
-            return Err(AppError::config(format!(
-                "log_level must be one of: {}",
-                valid_levels.join(", ")
-            )));
-        }
-
-        // Validate max queue size
-        if self.max_queue_size == 0 {
-            return Err(AppError::config("max_queue_size must be greater than 0"));
-        }
-
-        // Validate retry attempts
-        if self.retry_attempts > 10 {
-            return Err(AppError::config("retry_attempts should not exceed 10"));
-        }
-
-        // Validate retry delay
-        if self.retry_delay_secs == 0 {
-            return Err(AppError::config("retry_delay_secs must be greater than 0"));
-        }
-
-        Ok(())
-    }
-}
+// Removed unused DaemonConfig::validate method

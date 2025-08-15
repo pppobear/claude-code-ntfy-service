@@ -292,7 +292,7 @@ impl CommandHandler {
 
     /// Handle daemon stop command
     async fn handle_daemon_stop(&self) -> Result<()> {
-        let (pid_file, socket_path) = self.get_daemon_paths()?;
+        let (pid_file, _socket_path) = self.get_daemon_paths()?;
 
         match self.check_daemon_process(&pid_file)? {
             Some(pid_num) => {
@@ -380,7 +380,7 @@ impl CommandHandler {
             Some(pid_num) => {
                 // Try to get detailed status via IPC
                 match self.send_daemon_ipc_message(DaemonMessage::Status).await {
-                    Ok(DaemonResponse::Status { queue_size, is_running, uptime_secs }) => {
+                    Ok(DaemonResponse::Status { queue_size, is_running: _, uptime_secs }) => {
                         println!("Daemon is running (PID: {})", pid_num);
                         println!("  Queue size: {}", queue_size);
                         println!("  Uptime: {} seconds", uptime_secs);
@@ -576,36 +576,6 @@ impl CommandHandler {
         }
 
         Ok(())
-    }
-}
-
-/// Send process signal to daemon child process
-fn send_process_signal(child_pid: u32) {
-    #[cfg(unix)]
-    {
-        use std::process::Command;
-        
-        // Try SIGTERM first for graceful shutdown
-        match Command::new("kill")
-            .arg("-TERM")
-            .arg(child_pid.to_string())
-            .status()
-        {
-            Ok(status) if status.success() => {
-                info!("Sent SIGTERM to daemon process {}", child_pid);
-            }
-            Ok(_) => {
-                error!("Failed to send SIGTERM to daemon process {}", child_pid);
-            }
-            Err(e) => {
-                error!("Failed to execute kill command: {}", e);
-            }
-        }
-    }
-    
-    #[cfg(not(unix))]
-    {
-        warn!("Process signal sending not supported on this platform");
     }
 }
 

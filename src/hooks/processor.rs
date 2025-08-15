@@ -26,13 +26,6 @@ pub trait HookProcessor: Send + Sync {
     /// A ProcessedHook with enhanced data and metadata, or an error
     fn process(&self, hook_name: &str, data: Value) -> AppResult<ProcessedHook>;
     
-    /// Get the list of supported hook names
-    fn supported_hooks(&self) -> Vec<String>;
-    
-    /// Check if a hook is supported by this processor
-    fn supports_hook(&self, hook_name: &str) -> bool {
-        self.supported_hooks().contains(&hook_name.to_string())
-    }
 }
 
 /// Default implementation of HookProcessor
@@ -206,18 +199,6 @@ impl HookProcessor for DefaultHookProcessor {
         Ok(processed_hook)
     }
     
-    fn supported_hooks(&self) -> Vec<String> {
-        vec![
-            "PostToolUse".to_string(),
-            "PreTask".to_string(),
-            "PostTask".to_string(),
-            "PreEdit".to_string(),
-            "PostEdit".to_string(),
-            "SessionStart".to_string(),
-            "SessionEnd".to_string(),
-            "ErrorOccurred".to_string(),
-        ]
-    }
 }
 
 #[cfg(test)]
@@ -246,8 +227,8 @@ mod tests {
     
     #[test]
     fn test_default_processor_creation() {
-        let processor = DefaultHookProcessor::new(MockEnhancer, MockValidator);
-        assert!(!processor.supported_hooks().is_empty());
+        let _processor = DefaultHookProcessor::new(MockEnhancer, MockValidator);
+        // Just verify processor can be created successfully
     }
     
     #[test]
@@ -333,10 +314,7 @@ mod tests {
     struct FailingValidator;
     impl HookValidator for FailingValidator {
         fn validate_input(&self, _hook_name: &str, _data: &Value) -> AppResult<()> {
-            Err(AppError::HookValidation {
-                hook_name: "test".to_string(),
-                reason: "Validation failed".to_string(),
-            })
+            Err(AppError::ValidationError("Validation failed".to_string()))
         }
         
         fn validate_processed(&self, _hook: &ProcessedHook) -> AppResult<()> {
@@ -351,20 +329,4 @@ mod tests {
         assert!(result.is_err());
     }
 
-    #[test]
-    fn test_supports_hook() {
-        let processor = DefaultHookProcessor::new(MockEnhancer, MockValidator);
-        
-        // Test that supported_hooks returns a non-empty list
-        let supported = processor.supported_hooks();
-        assert!(!supported.is_empty());
-        
-        // Test that the supports_hook method works
-        for hook in &supported {
-            assert!(processor.supports_hook(hook));
-        }
-        
-        // Test an obviously unsupported hook
-        assert!(!processor.supports_hook("ThisHookDoesNotExist"));
-    }
 }

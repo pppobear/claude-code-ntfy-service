@@ -3,8 +3,8 @@
 //! This test validates that the unified clients integration maintains 100% functionality
 //! while eliminating code duplication between sync/async implementations.
 
-use claude_ntfy::daemon::config::{NtfyConfig};
-use claude_ntfy::daemon::clients::{create_sync_client_from_ntfy_config, create_async_client_from_ntfy_config};
+use claude_ntfy::config::NtfyConfig;
+use claude_ntfy::shared::clients::{create_sync_client_from_ntfy_config, create_async_client_from_ntfy_config};
 
 /// Test configuration for validation
 fn create_test_config() -> NtfyConfig {
@@ -26,7 +26,7 @@ fn test_sync_client_creation() {
     let result = create_sync_client_from_ntfy_config(&config);
     assert!(result.is_ok(), "Sync client creation should succeed");
     
-    let client = result.unwrap();
+    let _client = result.unwrap();
     
     // Verify client can be used for simple operations
     // Note: This is a smoke test - we're not actually sending notifications
@@ -41,7 +41,7 @@ async fn test_async_client_creation() {
     let result = create_async_client_from_ntfy_config(&config);
     assert!(result.is_ok(), "Async client creation should succeed");
     
-    let client = result.unwrap();
+    let _client = result.unwrap();
     
     // Verify client can be used for async operations
     // Note: This is a smoke test - we're not actually sending notifications

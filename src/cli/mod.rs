@@ -3,7 +3,6 @@
 //! This module handles argument parsing, command validation, and routing
 //! to appropriate handlers while maintaining separation of concerns.
 
-pub mod args;
 pub mod commands;
 pub mod handlers;
 pub mod context;

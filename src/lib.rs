@@ -5,7 +5,6 @@
 
 pub mod config;
 pub mod daemon;
-pub mod daemon_shared;
 pub mod hooks;
 pub mod templates;
 pub mod errors;
@@ -14,4 +13,5 @@ pub mod ntfy;
 
 // Re-export commonly used types for convenience
 pub use config::{Config, ConfigManager, NtfyConfig};
-pub use hooks::{ProcessedHook, DefaultHookProcessor, create_default_processor};
+pub use hooks::{DefaultHookProcessor, create_default_processor};
+pub use hooks::types::ProcessedHook;
