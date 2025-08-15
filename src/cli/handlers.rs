@@ -149,21 +149,29 @@ impl CommandHandler {
             self.context.project_path.clone().or_else(|| Some(PathBuf::from(".")))
         };
 
-        let config_manager = crate::config::ConfigManager::new(path)?;
+        // Check if config file already exists before creating ConfigManager
+        let config_path = crate::config::ConfigManager::get_config_path(path.clone())?;
+        let config_exists = config_path.exists();
 
-        if !force {
-            // Config already exists (created by ConfigManager::new)
-            println!(
-                "Configuration already initialized at: {:?}",
-                config_manager.config()
-            );
+        if config_exists && !force {
+            println!("Configuration already initialized at: {}", config_path.display());
             println!("Use --force to overwrite");
             return Ok(());
         }
 
-        // Save default configuration
-        config_manager.save()?;
-        println!("Configuration initialized successfully");
+        // Create or load the configuration
+        let config_manager = if global {
+            crate::config::ConfigManager::new(None)?
+        } else {
+            // For project init, force creation of project config even if global exists
+            crate::config::ConfigManager::new_project_config(path.unwrap_or_else(|| PathBuf::from(".")))?
+        };
+
+        // If config didn't exist or we're forcing, ensure it's saved
+        if !config_exists || force {
+            config_manager.save()?;
+            println!("Configuration initialized successfully at: {}", config_path.display());
+        }
 
         // Generate example hook scripts
         self.generate_hook_scripts()?;

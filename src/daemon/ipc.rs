@@ -14,6 +14,9 @@ use tracing::{debug, error, info, warn};
 
 use crate::daemon::shared::{DaemonMessage, DaemonResponse, NotificationTask};
 
+/// Maximum message size for IPC communication (1MB)
+const MAX_MESSAGE_SIZE: usize = 1024 * 1024;
+
 /// IPC Server for handling Unix socket connections from CLI clients
 pub struct IpcServer {
     socket_path: PathBuf,
@@ -183,8 +186,6 @@ impl IpcServer {
 
         debug!("New IPC connection established");
 
-        let mut buffer = [0u8; 8192]; // 8KB buffer
-        
         loop {
             // Read message length first (4 bytes)
             let mut length_bytes = [0u8; 4];
@@ -204,14 +205,23 @@ impl IpcServer {
             let message_length = u32::from_le_bytes(length_bytes) as usize;
             
             // Validate message length
-            if message_length > buffer.len() {
-                error!("Message too large: {} bytes", message_length);
+            if message_length == 0 {
+                error!("Invalid message length: 0 bytes");
+                Self::increment_error_count_static(&stats).await;
+                break;
+            }
+            
+            if message_length > MAX_MESSAGE_SIZE {
+                error!("Message too large: {} bytes (max: {} bytes)", message_length, MAX_MESSAGE_SIZE);
                 Self::increment_error_count_static(&stats).await;
                 break;
             }
 
+            // Dynamically allocate buffer for the message
+            let mut buffer = vec![0u8; message_length];
+
             // Read message payload
-            match stream.read_exact(&mut buffer[..message_length]).await {
+            match stream.read_exact(&mut buffer).await {
                 Ok(_) => {}
                 Err(e) => {
                     error!("Failed to read message payload: {}", e);
@@ -221,7 +231,7 @@ impl IpcServer {
             }
 
             // Deserialize message
-            let message: DaemonMessage = match bincode::deserialize(&buffer[..message_length]) {
+            let message: DaemonMessage = match bincode::deserialize(&buffer) {
                 Ok(msg) => msg,
                 Err(e) => {
                     error!("Failed to deserialize message: {}", e);
@@ -320,6 +330,29 @@ impl IpcServer {
         let serialized = bincode::serialize(&response)
             .context("Failed to serialize response")?;
 
+        // Validate response size
+        if serialized.len() > MAX_MESSAGE_SIZE {
+            error!("Response too large: {} bytes (max: {} bytes)",
+                   serialized.len(), MAX_MESSAGE_SIZE);
+            // Send error response instead
+            let error_response = DaemonResponse::Error(
+                format!("Response too large: {} bytes", serialized.len())
+            );
+            let error_serialized = bincode::serialize(&error_response)
+                .context("Failed to serialize error response")?;
+            let error_length = error_serialized.len() as u32;
+            let error_length_bytes = error_length.to_le_bytes();
+            
+            stream.write_all(&error_length_bytes).await
+                .context("Failed to write error response length")?;
+            stream.write_all(&error_serialized).await
+                .context("Failed to write error response payload")?;
+            stream.flush().await
+                .context("Failed to flush error response")?;
+            
+            return Ok(());
+        }
+
         let length = serialized.len() as u32;
         let length_bytes = length.to_le_bytes();
 
@@ -367,6 +400,12 @@ impl IpcClient {
         let serialized = bincode::serialize(&message)
             .context("Failed to serialize message")?;
 
+        // Validate message size before sending
+        if serialized.len() > MAX_MESSAGE_SIZE {
+            return Err(anyhow::anyhow!("Message too large: {} bytes (max: {} bytes)",
+                                      serialized.len(), MAX_MESSAGE_SIZE));
+        }
+
         let length = serialized.len() as u32;
         let length_bytes = length.to_le_bytes();
 
@@ -389,8 +428,9 @@ impl IpcClient {
         let response_length = u32::from_le_bytes(length_bytes) as usize;
 
         // Validate response length
-        if response_length > 1024 * 1024 { // 1MB max response
-            return Err(anyhow::anyhow!("Response too large: {} bytes", response_length));
+        if response_length > MAX_MESSAGE_SIZE {
+            return Err(anyhow::anyhow!("Response too large: {} bytes (max: {} bytes)",
+                                      response_length, MAX_MESSAGE_SIZE));
         }
 
         // Read response payload

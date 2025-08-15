@@ -199,14 +199,20 @@ mod integration_tests {
         // Test 1: Project initialization
         println!("  Testing project initialization...");
         let mut cmd = Command::cargo_bin("claude-ntfy").unwrap();
-        cmd.arg("init")
+        let output = cmd.arg("init")
             .arg("--project")
             .arg(project_path)
             .assert()
             .success();
         
+        println!("  Command output stdout: {}", String::from_utf8_lossy(&output.get_output().stdout));
+        println!("  Command output stderr: {}", String::from_utf8_lossy(&output.get_output().stderr));
+        
         // Verify config file was created
-        assert!(project_path.join(".claude/ntfy-service/config.toml").exists());
+        let config_file_path = project_path.join(".claude/ntfy-service/config.toml");
+        println!("  Looking for config file at: {}", config_file_path.display());
+        println!("  Config file exists: {}", config_file_path.exists());
+        assert!(config_file_path.exists());
         println!("    ✓ Project initialization successful");
         
         // Test 2: Configuration management

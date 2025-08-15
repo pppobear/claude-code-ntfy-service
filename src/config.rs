@@ -130,7 +130,8 @@ impl ConfigManager {
     ///
     /// Loads configuration from the appropriate location based on the project path.
     /// If a project path is provided, looks for project-level configuration first,
-    /// falling back to global configuration if not found.
+    /// then falls back to global configuration if project config doesn't exist.
+    /// If global config exists, uses it instead of creating a new project config.
     ///
     /// # Arguments
     ///
@@ -147,7 +148,68 @@ impl ConfigManager {
     /// - The configuration file cannot be read or parsed
     /// - Default configuration cannot be serialized and written
     pub fn new(project_path: Option<PathBuf>) -> AppResult<Self> {
-        let config_path = Self::get_config_path(project_path)?;
+        if let Some(ref path) = project_path {
+            let project_config_path = Self::get_config_path(Some(path.clone()))?;
+            
+            // If project config exists, use it
+            if project_config_path.exists() {
+                let config = Self::load_or_create(&project_config_path)?;
+                return Ok(ConfigManager {
+                    config_path: project_config_path,
+                    config,
+                });
+            }
+            
+            // Check if global config exists
+            let global_config_path = Self::get_config_path(None)?;
+            if global_config_path.exists() {
+                // Use global config instead of creating project config
+                let config = Self::load_or_create(&global_config_path)?;
+                return Ok(ConfigManager {
+                    config_path: global_config_path,
+                    config,
+                });
+            }
+            
+            // Neither exists, create project config
+            let config = Self::load_or_create(&project_config_path)?;
+            Ok(ConfigManager {
+                config_path: project_config_path,
+                config,
+            })
+        } else {
+            // Global config requested
+            let config_path = Self::get_config_path(None)?;
+            let config = Self::load_or_create(&config_path)?;
+            Ok(ConfigManager {
+                config_path,
+                config,
+            })
+        }
+    }
+
+    /// Creates a new ConfigManager instance with explicit project config creation
+    ///
+    /// Always creates or uses project-level configuration, even if global config exists.
+    /// This method should be used when the user explicitly wants to create a project config.
+    ///
+    /// # Arguments
+    ///
+    /// * `project_path` - Path to the project root where config will be created
+    ///
+    /// # Returns
+    ///
+    /// Returns a `ConfigManager` instance with project-level configuration
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if:
+    /// - The project path is None
+    /// - The configuration directory cannot be created
+    /// - The configuration file cannot be read or parsed
+    /// - Default configuration cannot be serialized and written
+    pub fn new_project_config(project_path: PathBuf) -> AppResult<Self> {
+        let config_path = Self::get_config_path(Some(project_path))?;
         let config = Self::load_or_create(&config_path)?;
 
         Ok(ConfigManager {
@@ -156,7 +218,7 @@ impl ConfigManager {
         })
     }
 
-    fn get_config_path(project_path: Option<PathBuf>) -> AppResult<PathBuf> {
+    pub fn get_config_path(project_path: Option<PathBuf>) -> AppResult<PathBuf> {
         let base_path = if let Some(path) = project_path {
             // Project-level configuration
             path.join(".claude").join("ntfy-service")
@@ -218,6 +280,39 @@ impl ConfigManager {
     /// A reference to the `Config` struct containing all configuration data.
     pub fn config(&self) -> &Config {
         &self.config
+    }
+
+    /// Returns the path to the configuration file being used
+    ///
+    /// This method helps users understand which configuration file is actually
+    /// being used (project-level or global), especially when fallback logic is applied.
+    ///
+    /// # Returns
+    ///
+    /// A reference to the PathBuf containing the configuration file path.
+    pub fn config_path(&self) -> &PathBuf {
+        &self.config_path
+    }
+
+    /// Checks if the current configuration is project-level or global
+    ///
+    /// # Returns
+    ///
+    /// `true` if using project-level configuration, `false` if using global configuration.
+    pub fn is_project_config(&self) -> bool {
+        // Check if the path contains the home directory pattern for global config
+        let path_str = self.config_path.to_string_lossy();
+        
+        // If it's in the user's home directory .claude folder, it's global
+        if let Some(home_dir) = std::env::var("HOME").ok() {
+            let global_pattern = format!("{}/.claude/ntfy-service/config.toml", home_dir);
+            if path_str == global_pattern {
+                return false;
+            }
+        }
+        
+        // Otherwise it's a project config
+        true
     }
 
     /// Returns a mutable reference to the configuration
