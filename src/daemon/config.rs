@@ -93,6 +93,7 @@ pub struct ConfigManager {
 }
 
 impl ConfigManager {
+    #[allow(dead_code)]
     pub fn new(project_path: Option<PathBuf>) -> Result<Self> {
         let config_path = Self::get_config_path(project_path)?;
         let config = Self::load_or_create(&config_path)?;
@@ -103,6 +104,7 @@ impl ConfigManager {
         })
     }
 
+    #[allow(dead_code)]
     fn get_config_path(project_path: Option<PathBuf>) -> Result<PathBuf> {
         let base_path = if let Some(path) = project_path {
             // Project-level configuration
@@ -139,6 +141,7 @@ impl ConfigManager {
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub fn config(&self) -> &Config {
         &self.config
     }
@@ -154,6 +157,7 @@ impl ConfigManager {
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub fn get_hook_topic(&self, hook_name: &str) -> String {
         self.config
             .hooks
@@ -163,6 +167,7 @@ impl ConfigManager {
             .unwrap_or_else(|| self.config.ntfy.default_topic.clone())
     }
 
+    #[allow(dead_code)]
     pub fn get_hook_priority(&self, hook_name: &str) -> u8 {
         self.config
             .hooks
@@ -172,6 +177,7 @@ impl ConfigManager {
             .unwrap_or_else(|| self.config.ntfy.default_priority.unwrap_or(3))
     }
 
+    #[allow(dead_code)]
     pub fn should_process_hook(&self, hook_name: &str, hook_data: &serde_json::Value) -> bool {
         if !self.config.hooks.enabled {
             return false;

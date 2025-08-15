@@ -75,6 +75,7 @@ impl DefaultHookValidator {
     }
     
     /// Create a new DefaultHookValidator with custom settings
+    #[allow(dead_code)]
     pub fn with_config(
         max_depth: usize,
         max_string_length: usize,

@@ -64,6 +64,7 @@ pub use factory::{ClientFactory, DefaultClientFactory};
 use crate::config::{Config, NtfyConfig};
 
 /// Create a notification client from application configuration
+#[allow(dead_code)]
 pub fn create_client_from_config(config: &Config) -> anyhow::Result<Box<dyn NotificationClient>> {
     let factory = DefaultClientFactory::new();
     factory.create_from_app_config(config)
@@ -99,6 +100,7 @@ pub mod compat {
     use anyhow::Result;
     
     /// Legacy-compatible sync client creation
+    #[allow(dead_code)]
     pub fn create_legacy_sync_client(
         base_url: String,
         auth_token: Option<String>, 
@@ -118,6 +120,7 @@ pub mod compat {
     }
     
     /// Legacy-compatible async client creation
+    #[allow(dead_code)]
     pub fn create_legacy_async_client(
         base_url: String,
         auth_token: Option<String>,
@@ -139,6 +142,7 @@ pub mod compat {
 // From trait implementation is now in clients/ntfy.rs to avoid conflicts
 
 /// Module-level convenience functions for common operations
+#[allow(dead_code)]
 pub async fn send_notification(
     config: &Config, 
     topic: &str, 
@@ -158,12 +162,14 @@ pub async fn send_notification(
 }
 
 /// Quick health check for the notification service
+#[allow(dead_code)]
 pub async fn health_check(config: &Config) -> anyhow::Result<()> {
     let client = create_client_from_config(config)?;
     client.health_check().await
 }
 
 /// Get statistics for all configured notification clients
+#[allow(dead_code)]
 pub fn get_client_stats(config: &Config) -> anyhow::Result<ClientStats> {
     let client = create_client_from_config(config)?;
     Ok(client.get_stats())

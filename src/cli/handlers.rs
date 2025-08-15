@@ -438,6 +438,20 @@ impl CommandHandler {
         let socket_path = create_socket_path(None)?;
         let pid_file = socket_path.with_extension("pid");
         
+        // Check if daemon is already running
+        match self.check_daemon_process(&pid_file)? {
+            Some(pid_num) => {
+                return Err(anyhow::anyhow!(
+                    "Daemon is already running with PID: {}. Stop it first with 'claude-ntfy daemon stop'",
+                    pid_num
+                ));
+            }
+            None => {
+                // No daemon running, safe to start new one
+                debug!("No existing daemon found, proceeding with startup");
+            }
+        }
+        
         // Ensure parent directory exists
         if let Some(parent) = socket_path.parent() {
             std::fs::create_dir_all(parent)
@@ -481,6 +495,28 @@ impl CommandHandler {
         // Check if we're running as a detached daemon
         let is_detached = std::env::var("CLAUDE_DAEMON_DETACHED").is_ok();
         
+        // Create socket path for daemon files
+        let socket_path = create_socket_path(None)?;
+        let pid_file = socket_path.with_extension("pid");
+        
+        // Only check for existing daemon if this is NOT a detached process spawned by start_daemon_detached()
+        // The detached process check was already done in the parent process
+        if !is_detached {
+            // Check if daemon is already running
+            match self.check_daemon_process(&pid_file)? {
+                Some(pid_num) => {
+                    return Err(anyhow::anyhow!(
+                        "Daemon is already running with PID: {}. Stop it first with 'claude-ntfy daemon stop'",
+                        pid_num
+                    ));
+                }
+                None => {
+                    // No daemon running, safe to start new one
+                    debug!("No existing daemon found, proceeding with startup");
+                }
+            }
+        }
+        
         if is_detached {
             // Detached mode - become session leader and close inherited handles
             println!("Detaching from parent process...");
@@ -497,9 +533,6 @@ impl CommandHandler {
         }
         
         // Write PID file for current process
-        let socket_path = create_socket_path(None)?;
-        let pid_file = socket_path.with_extension("pid");
-        
         std::fs::write(&pid_file, process::id().to_string())
             .context("Failed to write PID file")?;
             

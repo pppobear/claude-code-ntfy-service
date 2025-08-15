@@ -10,6 +10,7 @@ pub use types::{AppError, AppResult};
 pub use context::ErrorContextExt;
 
 /// Convenience type alias for Results using AppError
+#[allow(dead_code)]
 pub type Result<T> = std::result::Result<T, AppError>;
 
 /// Convert from anyhow::Error to AppError for migration compatibility

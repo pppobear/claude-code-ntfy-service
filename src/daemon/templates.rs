@@ -285,6 +285,7 @@ impl MessageFormatter {
         self.priority_map.get(hook_name).cloned().unwrap_or(3)
     }
 
+    #[allow(dead_code)]
     pub fn get_tags(&self, hook_name: &str) -> Option<Vec<String>> {
         self.tag_map.get(hook_name).cloned()
     }

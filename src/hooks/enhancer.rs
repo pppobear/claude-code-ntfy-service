@@ -42,6 +42,7 @@ impl DefaultHookDataEnhancer {
     }
     
     /// Create a new DefaultHookDataEnhancer with custom settings
+    #[allow(dead_code)]
     pub fn with_config(infer_success_field: bool, add_timestamps: bool) -> Self {
         Self {
             infer_success_field,

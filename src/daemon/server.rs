@@ -223,16 +223,6 @@ impl NotificationDaemon {
 // DaemonMessage and DaemonResponse are now imported from shared module
 
 
-/// Main entry point for the standalone daemon binary
-/// 
-/// This function provides a simple entry point for the claude-ntfy-daemon binary.
-/// Note: This was previously marked as unused by the compiler but is actually
-/// needed for the daemon binary to function properly.
-pub async fn main() -> Result<()> {
-    eprintln!("claude-ntfy-daemon: This binary is deprecated.");
-    eprintln!("Please use 'claude-ntfy daemon start' instead.");
-    std::process::exit(1);
-}
 
 pub fn is_process_running(pid: u32) -> bool {
     #[cfg(unix)]

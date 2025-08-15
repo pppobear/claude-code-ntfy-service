@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use async_trait::async_trait;
 use reqwest::{Client, header::{HeaderMap, HeaderValue, AUTHORIZATION, CONTENT_TYPE}};
 use anyhow::{Context, Result};

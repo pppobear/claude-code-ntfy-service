@@ -55,6 +55,7 @@ impl DefaultHookProcessor {
     }
     
     /// Create a new DefaultHookProcessor with custom configuration
+    #[allow(dead_code)]
     pub fn with_config(
         enhancer: impl HookDataEnhancer + 'static,
         validator: impl HookValidator + 'static,

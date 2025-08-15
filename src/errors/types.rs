@@ -23,6 +23,7 @@ pub enum AppError {
 
     // Hook processing errors
     #[error("Hook processing failed for '{hook_name}': {message}")]
+    #[allow(dead_code)]
     HookProcessing {
         hook_name: String,
         message: String,
@@ -93,6 +94,7 @@ impl AppError {
     
     
     /// Create a new I/O error
+    #[allow(dead_code)]
     pub fn io(path: impl Into<PathBuf>, operation: impl Into<String>) -> Self {
         Self::Io {
             path: path.into(),
@@ -116,12 +118,14 @@ impl AppError {
     
     
     /// Check if this error is retryable (useful for notification sending)
+    #[allow(dead_code)]
     pub fn is_retryable(&self) -> bool {
         // With current remaining error types, none are considered retryable
         false
     }
     
     /// Get the error category for metrics and logging
+    #[allow(dead_code)]
     pub fn category(&self) -> &'static str {
         match self {
             Self::Config { .. } => "config",
