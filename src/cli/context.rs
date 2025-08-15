@@ -9,6 +9,7 @@ use anyhow::Result;
 use crate::config::ConfigManager;
 
 /// CLI execution context containing shared dependencies and configuration
+#[derive(Clone)]
 pub struct CliContext {
     pub project_path: Option<PathBuf>,
     pub verbose: bool,

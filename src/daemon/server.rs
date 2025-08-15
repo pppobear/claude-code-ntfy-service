@@ -1,7 +1,6 @@
 use anyhow::{Context, Result};
 use flume::Receiver;
 use std::sync::{atomic::{AtomicUsize, Ordering}, Arc};
-use tokio::signal;
 use tokio::time::{sleep, Duration};
 use tracing::{debug, error, info, warn};
 
@@ -47,10 +46,6 @@ impl NotificationDaemon {
     pub async fn run(self) -> Result<()> {
         info!("Notification daemon started");
 
-        // Set up graceful shutdown
-        let ctrl_c = signal::ctrl_c();
-        tokio::pin!(ctrl_c);
-
         loop {
             tokio::select! {
                 // Handle incoming notification tasks
@@ -62,13 +57,7 @@ impl NotificationDaemon {
 
                 // Handle IPC shutdown signal
                 _ = self.shutdown_receiver.recv_async() => {
-                    info!("Received IPC shutdown signal, stopping daemon");
-                    break;
-                }
-
-                // Handle Ctrl+C shutdown signal
-                _ = &mut ctrl_c => {
-                    info!("Received Ctrl+C signal, stopping daemon");
+                    info!("Received shutdown signal, stopping notification daemon");
                     break;
                 }
             }

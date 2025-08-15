@@ -267,7 +267,7 @@ impl CommandHandler {
     async fn handle_daemon(&self, action: DaemonAction) -> Result<()> {
         match action {
             DaemonAction::Start { detach } => {
-                self.handle_daemon_start(detach)
+                self.handle_daemon_start(detach).await
             }
             DaemonAction::Stop => {
                 self.handle_daemon_stop().await
@@ -282,11 +282,11 @@ impl CommandHandler {
     }
 
     /// Handle daemon start command
-    fn handle_daemon_start(&self, detach: bool) -> Result<()> {
+    async fn handle_daemon_start(&self, detach: bool) -> Result<()> {
         if detach {
             self.start_daemon_detached()
         } else {
-            self.start_daemon_foreground()
+            self.start_daemon_foreground().await
         }
     }
 
@@ -301,10 +301,10 @@ impl CommandHandler {
                     Ok(_) => {
                         info!("Daemon stop signal sent via IPC");
                         
-                        // Wait for daemon to stop (up to 5 seconds)
+                        // Wait for daemon to stop (up to 10 seconds)
                         use std::time::{Duration, Instant};
                         let start_time = Instant::now();
-                        let timeout = Duration::from_secs(5);
+                        let timeout = Duration::from_secs(10);
 
                         while start_time.elapsed() < timeout {
                             std::thread::sleep(Duration::from_millis(100));
@@ -432,100 +432,81 @@ impl CommandHandler {
 
     /// Start daemon in detached (background) mode
     fn start_daemon_detached(&self) -> Result<()> {
-        let daemon_binary = if cfg!(debug_assertions) {
-            "./target/debug/claude-ntfy-daemon"
-        } else {
-            "claude-ntfy-daemon"
-        };
+        println!("Starting daemon in detached mode...");
         
-        let mut child = process::Command::new(daemon_binary)
-            .arg("--background")
-            .arg("--global") // Start as global daemon
-            .stdout(process::Stdio::null())  // Redirect stdout to null
-            .stderr(process::Stdio::piped())  // Capture stderr for startup errors
-            .spawn()?;
+        // Create socket path for daemon files
+        let socket_path = create_socket_path(None)?;
+        let pid_file = socket_path.with_extension("pid");
         
-        // Wait a short time for the daemon to start and perform initial checks
-        use std::time::{Duration, Instant};
-        let start_time = Instant::now();
-        let timeout = Duration::from_secs(3);
-        
-        while start_time.elapsed() < timeout {
-            // Check if the child process has exited (indicating an error during startup)
-            match child.try_wait()? {
-                Some(_exit_status) => {
-                    // Process exited, which means there was an error
-                    let output = child.wait_with_output()?;
-                    let error_msg = String::from_utf8_lossy(&output.stderr);
-                    return Err(anyhow::anyhow!("Failed to start daemon: {}", error_msg.trim()));
-                }
-                None => {
-                    // Process is still running, check if PID file has been created
-                    let socket_path = create_socket_path(None)?; // Global socket
-                    let pid_file = socket_path.with_extension("pid");
-                    if pid_file.exists() {
-                        // Daemon started successfully
-                        break;
-                    }
-                    std::thread::sleep(Duration::from_millis(100));
-                }
-            }
+        // Ensure parent directory exists
+        if let Some(parent) = socket_path.parent() {
+            std::fs::create_dir_all(parent)
+                .context("Failed to create socket directory")?;
         }
+
+        // Get current executable path
+        let current_exe = std::env::current_exe()
+            .context("Failed to get current executable path")?;
+
+        // Spawn a new process running the daemon in foreground mode
+        // This avoids the tokio runtime nesting issue
+        let mut child = process::Command::new(&current_exe)
+            .arg("daemon")
+            .arg("start")
+            .env("CLAUDE_DAEMON_DETACHED", "1") // Signal to run detached
+            .stdin(process::Stdio::null())
+            .stdout(process::Stdio::null())
+            .stderr(process::Stdio::null())
+            .spawn()
+            .context("Failed to spawn daemon process")?;
+
+        // Wait briefly to see if the child process fails immediately
+        std::thread::sleep(std::time::Duration::from_millis(500));
         
-        // Final check - make sure the daemon is still running
         match child.try_wait()? {
-            Some(_exit_status) => {
-                // Process exited after starting, get the error
-                let output = child.wait_with_output()?;
-                let error_msg = String::from_utf8_lossy(&output.stderr);
-                return Err(anyhow::anyhow!("Daemon exited after starting: {}", error_msg.trim()));
+            Some(exit_status) => {
+                return Err(anyhow::anyhow!("Daemon process exited immediately: {}", exit_status));
             }
             None => {
-                // Daemon is still running, success
-                println!("Daemon started successfully");
+                // Process is still running, consider it successfully started
+                println!("Daemon started successfully with PID: {}", child.id());
             }
         }
-        
+
         Ok(())
     }
 
     /// Start daemon in foreground mode
-    fn start_daemon_foreground(&self) -> Result<()> {
-        println!("Starting daemon in foreground...");
+    async fn start_daemon_foreground(&self) -> Result<()> {
+        // Check if we're running as a detached daemon
+        let is_detached = std::env::var("CLAUDE_DAEMON_DETACHED").is_ok();
         
-        // Start daemon as child process in same process group (default foreground mode)
-        let daemon_binary = if cfg!(debug_assertions) {
-            "./target/debug/claude-ntfy-daemon"
-        } else {
-            "claude-ntfy-daemon"
-        };
-        
-        let mut child = process::Command::new(daemon_binary)
-            .arg("--global") // Start as global daemon
-            .spawn()?;
+        if is_detached {
+            // Detached mode - become session leader and close inherited handles
+            println!("Detaching from parent process...");
             
-        let child_id = child.id();
-        info!("Daemon started with PID: {}", child_id);
-        
-        // In foreground mode, simply wait for the daemon child process to exit
-        // The daemon will handle Ctrl+C signals directly, no need for complex coordination
-        println!("Waiting for daemon to complete (Press Ctrl+C to stop)...");
-        
-        match child.wait() {
-            Ok(status) => {
-                if status.success() {
-                    info!("Daemon exited successfully");
-                    Ok(())
-                } else {
-                    warn!("Daemon exited with status: {}", status);
-                    Err(anyhow::anyhow!("Daemon exited with error: {}", status))
+            // Create new session (Unix only)
+            #[cfg(unix)]
+            unsafe {
+                if libc::setsid() == -1 {
+                    return Err(anyhow::anyhow!("Failed to create new session"));
                 }
             }
-            Err(e) => {
-                error!("Error waiting for daemon: {}", e);
-                Err(e.into())
-            }
+        } else {
+            println!("Starting daemon in foreground...");
         }
+        
+        // Write PID file for current process
+        let socket_path = create_socket_path(None)?;
+        let pid_file = socket_path.with_extension("pid");
+        
+        std::fs::write(&pid_file, process::id().to_string())
+            .context("Failed to write PID file")?;
+            
+        info!("Daemon started with PID: {}", process::id());
+        
+        // Run integrated daemon in current async context
+        self.run_integrated_daemon().await
     }
 
     /// Handle test notification
@@ -935,6 +916,113 @@ To start the daemon:
 "#;
 
         print!("{}", CLAUDE_SETTINGS_TEMPLATE);
+        Ok(())
+    }
+
+    /// Run integrated daemon with IPC server and notification processor
+    async fn run_integrated_daemon(&self) -> Result<()> {
+        use crate::daemon::{ipc_server::IpcServer, server::NotificationDaemon};
+        use flume::unbounded;
+        use std::sync::{atomic::AtomicUsize, Arc};
+
+        // Create communication channels
+        let (task_sender, task_receiver) = unbounded::<NotificationTask>();
+        let (shutdown_sender, shutdown_receiver) = unbounded::<()>();
+        let (ipc_shutdown_sender, ipc_shutdown_receiver) = unbounded::<()>();
+        let (main_shutdown_sender, main_shutdown_receiver) = unbounded::<()>();
+        let queue_size = Arc::new(AtomicUsize::new(0));
+
+        // Create socket path
+        let socket_path = create_socket_path(None)?; // Global daemon
+        
+        // Ensure parent directory exists
+        if let Some(parent) = socket_path.parent() {
+            std::fs::create_dir_all(parent)
+                .context("Failed to create socket directory")?;
+        }
+
+        // Create IPC server
+        let ipc_server = IpcServer::new(
+            &socket_path,
+            task_sender,
+            ipc_shutdown_receiver,
+            shutdown_sender.clone(),
+            queue_size.clone(),
+            main_shutdown_sender.clone(),
+        )?;
+
+        // Create notification daemon
+        let notification_daemon = NotificationDaemon::new(
+            task_receiver,
+            shutdown_receiver,
+            queue_size.clone(),
+        )?;
+
+        info!("Starting integrated daemon components");
+
+        // Set up graceful shutdown on Ctrl+C
+        let shutdown_sender_clone = shutdown_sender.clone();
+        let ipc_shutdown_sender_clone = ipc_shutdown_sender.clone();
+        let main_shutdown_sender_clone = main_shutdown_sender.clone();
+        let socket_path_clone = socket_path.clone();
+        let pid_file = socket_path.with_extension("pid");
+        
+        tokio::spawn(async move {
+            if let Err(e) = tokio::signal::ctrl_c().await {
+                error!("Failed to listen for Ctrl+C: {}", e);
+                return;
+            }
+            
+            info!("Received Ctrl+C signal, stopping daemon");
+            
+            // Send shutdown signals
+            if let Err(e) = shutdown_sender_clone.send_async(()).await {
+                warn!("Failed to send shutdown signal to notification daemon: {}", e);
+            }
+            
+            if let Err(e) = ipc_shutdown_sender_clone.send_async(()).await {
+                warn!("Failed to send shutdown signal to IPC server: {}", e);
+            }
+            
+            // Signal main process to exit
+            if let Err(e) = main_shutdown_sender_clone.send_async(()).await {
+                warn!("Failed to send main shutdown signal: {}", e);
+            }
+        });
+
+        // Clean up on exit
+        let _guard = scopeguard::guard((), |_| {
+            // Clean up socket and PID files
+            if socket_path_clone.exists() {
+                let _ = std::fs::remove_file(&socket_path_clone);
+            }
+            if pid_file.exists() {
+                let _ = std::fs::remove_file(&pid_file);
+            }
+            info!("Daemon cleanup completed");
+        });
+
+        // Run IPC server and notification daemon concurrently, with shutdown handling
+        tokio::select! {
+            result = ipc_server.run() => {
+                if let Err(e) = result {
+                    error!("IPC server error: {}", e);
+                }
+            }
+            result = notification_daemon.run() => {
+                if let Err(e) = result {
+                    error!("Notification daemon error: {}", e);
+                }
+            }
+            result = main_shutdown_receiver.recv_async() => {
+                match result {
+                    Ok(_) => info!("Received main shutdown signal, terminating daemon"),
+                    Err(e) => warn!("Main shutdown signal error: {}", e),
+                }
+            }
+        }
+
+        info!("Integrated daemon stopped");
         Ok(())
     }
 }

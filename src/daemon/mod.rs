@@ -7,6 +7,7 @@
 //! - Client interface for CLI communication
 
 pub mod ipc;
+pub mod ipc_server;
 pub mod server;
 pub mod shared;
 pub mod config;
