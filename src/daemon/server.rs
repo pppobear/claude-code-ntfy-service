@@ -294,7 +294,7 @@ pub async fn main() -> Result<()> {
                 project_path = Some(PathBuf::from(arg));
             }
             _ => {
-                eprintln!("Unknown argument: {}", args[i]);
+                error!("Unknown argument: {}", args[i]);
                 std::process::exit(1);
             }
         }

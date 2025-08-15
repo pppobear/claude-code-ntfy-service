@@ -21,7 +21,7 @@ use serde_json::Value;
 use std::io::{self, Read};
 use std::path::PathBuf;
 use std::process;
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 
 
 /// Coordinates all command handling operations with dependency injection via CliContext
@@ -295,7 +295,7 @@ impl CommandHandler {
                 // Try to send shutdown signal via Unix socket IPC first
                 match self.send_daemon_ipc_message(DaemonMessage::Shutdown).await {
                     Ok(_) => {
-                        println!("Daemon stop signal sent via IPC");
+                        info!("Daemon stop signal sent via IPC");
                         
                         // Wait for daemon to stop (up to 5 seconds)
                         use std::time::{Duration, Instant};
@@ -326,20 +326,20 @@ impl CommandHandler {
                         // Fallback: try to kill the process directly
                         #[cfg(unix)]
                         {
-                            println!("Attempting to forcefully terminate daemon process...");
+                            info!("Attempting to forcefully terminate daemon process...");
                             match std::process::Command::new("kill")
                                 .arg("-TERM")
                                 .arg(pid_num.to_string())
                                 .status()
                             {
                                 Ok(status) if status.success() => {
-                                    println!("Sent SIGTERM to daemon process");
+                                    info!("Sent SIGTERM to daemon process");
                                     
                                     // Wait a bit for graceful shutdown
                                     std::thread::sleep(std::time::Duration::from_secs(2));
                                     
                                     if is_process_running(pid_num) {
-                                        println!("Process still running, sending SIGKILL...");
+                                        warn!("Process still running, sending SIGKILL...");
                                         let _ = std::process::Command::new("kill")
                                             .arg("-KILL")
                                             .arg(pid_num.to_string())
@@ -350,14 +350,14 @@ impl CommandHandler {
                                         let _ = std::fs::remove_file(&pid_file);
                                     }
                                 }
-                                Ok(_) => println!("Failed to send signal to daemon process"),
-                                Err(e) => println!("Failed to execute kill command: {}", e),
+                                Ok(_) => error!("Failed to send signal to daemon process"),
+                                Err(e) => error!("Failed to execute kill command: {}", e),
                             }
                         }
                         
                         #[cfg(not(unix))]
                         {
-                            println!("Cannot forcefully terminate daemon on this platform");
+                            warn!("Cannot forcefully terminate daemon on this platform");
                         }
                     }
                 }
@@ -501,7 +501,7 @@ impl CommandHandler {
             .spawn()?;
             
         let child_id = child.id();
-        println!("Daemon started with PID: {}", child_id);
+        info!("Daemon started with PID: {}", child_id);
         
         // In foreground mode, simply wait for the daemon child process to exit
         // The daemon will handle Ctrl+C signals directly, no need for complex coordination
@@ -510,15 +510,15 @@ impl CommandHandler {
         match child.wait() {
             Ok(status) => {
                 if status.success() {
-                    println!("Daemon exited successfully");
+                    info!("Daemon exited successfully");
                     Ok(())
                 } else {
-                    println!("Daemon exited with status: {}", status);
+                    warn!("Daemon exited with status: {}", status);
                     Err(anyhow::anyhow!("Daemon exited with error: {}", status))
                 }
             }
             Err(e) => {
-                eprintln!("Error waiting for daemon: {}", e);
+                error!("Error waiting for daemon: {}", e);
                 Err(e.into())
             }
         }
@@ -588,20 +588,20 @@ fn send_process_signal(child_pid: u32) {
             .status()
         {
             Ok(status) if status.success() => {
-                println!("Sent SIGTERM to daemon process {}", child_pid);
+                info!("Sent SIGTERM to daemon process {}", child_pid);
             }
             Ok(_) => {
-                eprintln!("Failed to send SIGTERM to daemon process {}", child_pid);
+                error!("Failed to send SIGTERM to daemon process {}", child_pid);
             }
             Err(e) => {
-                eprintln!("Failed to execute kill command: {}", e);
+                error!("Failed to execute kill command: {}", e);
             }
         }
     }
     
     #[cfg(not(unix))]
     {
-        eprintln!("Process signal sending not supported on this platform");
+        warn!("Process signal sending not supported on this platform");
     }
 }
 
@@ -684,7 +684,7 @@ impl CommandHandler {
             _ => {
                 // Clean up stale/invalid PID file
                 if let Err(e) = std::fs::remove_file(pid_file) {
-                    eprintln!("Warning: Failed to remove stale PID file: {}", e);
+                    warn!("Failed to remove stale PID file: {}", e);
                 }
                 Ok(None)
             }
