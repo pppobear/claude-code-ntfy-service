@@ -556,6 +556,15 @@ mod tests {
             hook_data: serde_json::to_string(&serde_json::json!({"test": "data"})).unwrap(),
             retry_count: 0,
             timestamp: chrono::Local::now(),
+            ntfy_config: crate::daemon::shared::NtfyTaskConfig {
+                server_url: "https://ntfy.sh".to_string(),
+                topic: "test-topic".to_string(),
+                priority: Some(3),
+                tags: Some(vec!["test".to_string()]),
+                auth_token: None,
+                send_format: "json".to_string(),
+            },
+            project_path: Some("/tmp/test-project".to_string()),
         };
 
         let submit_result = timeout(Duration::from_secs(1), client.send_task(task)).await;

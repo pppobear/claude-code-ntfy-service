@@ -7,9 +7,8 @@ use tokio::time::{sleep, Duration};
 use tracing::{debug, error, info, warn};
 
 // Import specific items from daemon modules
-use super::config::ConfigManager;
 use super::templates::{MessageFormatter, TemplateEngine};
-use super::clients::{create_async_client_from_ntfy_config, traits::NotificationClient, AsyncNtfyClient};
+use super::clients::{traits::NotificationClient, AsyncNtfyClient};
 use super::ipc::{IpcServer, create_socket_path};
 use super::ntfy::NtfyMessage;
 use super::shared::NotificationTask;
@@ -35,8 +34,6 @@ fn resolve_project_path(project_path: Option<PathBuf>) -> Option<PathBuf> {
 // NotificationTask is now imported from shared module
 
 pub struct NotificationDaemon {
-    config_manager: Arc<ConfigManager>,
-    ntfy_client: Arc<AsyncNtfyClient>,
     template_engine: Arc<TemplateEngine>,
     message_formatter: Arc<MessageFormatter>,
     task_receiver: Receiver<NotificationTask>,
@@ -48,29 +45,21 @@ pub struct NotificationDaemon {
 
 impl NotificationDaemon {
     pub fn new(
-        project_path: Option<PathBuf>,
         task_receiver: Receiver<NotificationTask>,
         shutdown_receiver: Receiver<()>,
         queue_size: Arc<AtomicUsize>,
     ) -> Result<Self> {
-        let config_manager = Arc::new(ConfigManager::new(project_path)?);
-        let config = config_manager.config().clone();
-
-        let ntfy_client = Arc::new(create_async_client_from_ntfy_config(&config.ntfy)?);
-
         let template_engine = Arc::new(TemplateEngine::new()?);
         let message_formatter = Arc::new(MessageFormatter::default());
 
         Ok(NotificationDaemon {
-            config_manager,
-            ntfy_client,
             template_engine,
             message_formatter,
             task_receiver,
             shutdown_receiver,
             queue_size,
-            max_retries: config.daemon.retry_attempts,
-            retry_delay: Duration::from_secs(config.daemon.retry_delay_secs),
+            max_retries: 3, // Default retry attempts
+            retry_delay: Duration::from_secs(5), // Default retry delay
         })
     }
 
@@ -123,7 +112,8 @@ impl NotificationDaemon {
     }
 
     async fn process_task(&self, task: NotificationTask) {
-        debug!("Processing notification task: {}", task.hook_name);
+        debug!("Processing notification task: {} from project: {:?}", 
+               task.hook_name, task.project_path);
 
         // Deserialize hook data from JSON string
         let hook_data: serde_json::Value = match serde_json::from_str(&task.hook_data) {
@@ -134,17 +124,17 @@ impl NotificationDaemon {
             }
         };
 
-        // Check if hook should be processed
-        if !self
-            .config_manager
-            .should_process_hook(&task.hook_name, &hook_data)
-        {
-            debug!("Hook {} filtered out, skipping", task.hook_name);
-            return;
-        }
+        // Create dynamic ntfy client based on task configuration
+        let ntfy_client = match self.create_ntfy_client(&task.ntfy_config).await {
+            Ok(client) => client,
+            Err(e) => {
+                error!("Failed to create ntfy client for task {}: {}", task.hook_name, e);
+                return;
+            }
+        };
 
         // Prepare notification message
-        let message = match self.prepare_message(&task).await {
+        let message = match self.prepare_message(&task, &hook_data).await {
             Ok(msg) => msg,
             Err(e) => {
                 error!(
@@ -158,7 +148,7 @@ impl NotificationDaemon {
         // Send notification with retry logic
         let mut attempt = 0;
         loop {
-            match self.ntfy_client.send(&message).await {
+            match ntfy_client.send(&message).await {
                 Ok(_) => {
                     info!(
                         "Successfully sent notification for hook: {}",
@@ -187,68 +177,54 @@ impl NotificationDaemon {
         }
     }
 
-    async fn prepare_message(&self, task: &NotificationTask) -> Result<NtfyMessage> {
-        let config = self.config_manager.config();
+    /// Create ntfy client dynamically based on task configuration
+    async fn create_ntfy_client(&self, config: &super::shared::NtfyTaskConfig) -> Result<AsyncNtfyClient> {
+        use super::clients::ntfy::NtfyClientConfig;
+        use super::clients::traits::RetryConfig;
+        
+        let client_config = NtfyClientConfig {
+            server_url: config.server_url.clone(),
+            auth_token: config.auth_token.clone(),
+            timeout_secs: Some(30), // Default timeout
+            send_format: config.send_format.clone(),
+            retry_config: RetryConfig::exponential(3, 1000), // 3 retries, 1s base delay
+            user_agent: Some("claude-ntfy-service".to_string()),
+        };
 
-        // Deserialize hook data from JSON string
-        let hook_data: serde_json::Value = serde_json::from_str(&task.hook_data)
-            .context("Failed to deserialize hook data for message preparation")?;
+        let client = AsyncNtfyClient::new(client_config)
+            .context("Failed to create ntfy client")?;
+        
+        Ok(client)
+    }
 
-        // Get template name and render message body
+    async fn prepare_message(&self, task: &NotificationTask, hook_data: &serde_json::Value) -> Result<NtfyMessage> {
+
+        // Get template name and render message body  
         let template_name = task.hook_name.replace('_', "-");
         let formatted_data = self
             .template_engine
             .format_hook_data(&task.hook_name, &hook_data);
 
-        let body = if config.templates.use_custom {
-            if let Some(custom_template) = config.templates.custom_templates.get(&task.hook_name) {
-                let mut hb = handlebars::Handlebars::new();
-                hb.set_strict_mode(false);
-                hb.render_template(custom_template, &formatted_data)
-                    .unwrap_or_else(|e| {
-                        error!("Failed to render custom template: {}", e);
-                        self.template_engine
-                            .render(
-                                &template_name,
-                                &formatted_data,
-                                Some(&config.templates.variables),
-                            )
-                            .unwrap_or_else(|_| format!("Hook: {}", task.hook_name))
-                    })
-            } else {
-                self.template_engine
-                    .render(
-                        &template_name,
-                        &formatted_data,
-                        Some(&config.templates.variables),
-                    )
-                    .context("Failed to render template")?
-            }
-        } else {
-            self.template_engine
-                .render(
-                    &template_name,
-                    &formatted_data,
-                    Some(&config.templates.variables),
-                )
-                .context("Failed to render template")?
-        };
+        // Use default template rendering (no custom templates in global daemon)
+        let body = self.template_engine
+            .render(&template_name, &formatted_data, None)
+            .unwrap_or_else(|_| {
+                // Fallback to simple message if template fails
+                format!("Hook: {}\nData: {}", task.hook_name, hook_data)
+            });
 
         // Format title
         let title = self
             .message_formatter
             .format_title(&task.hook_name, &formatted_data);
 
-        // Get topic, priority, and tags
-        let topic = self.config_manager.get_hook_topic(&task.hook_name);
-        let priority = self.config_manager.get_hook_priority(&task.hook_name);
-        let tags = self
-            .message_formatter
-            .get_tags(&task.hook_name)
-            .or_else(|| config.ntfy.default_tags.clone());
+        // Get configuration from task (no longer from config_manager)
+        let topic = &task.ntfy_config.topic;
+        let priority = task.ntfy_config.priority.unwrap_or(3);
+        let tags = task.ntfy_config.tags.clone();
 
         Ok(NtfyMessage {
-            topic,
+            topic: topic.clone(),
             title: Some(title),
             message: body,
             priority: Some(priority),
@@ -260,7 +236,7 @@ impl NotificationDaemon {
             email: None,
             call: None,
             actions: None,
-            send_format: "json".to_string(),
+            send_format: task.ntfy_config.send_format.clone(),
         })
     }
 
@@ -279,10 +255,10 @@ impl NotificationDaemon {
 
 // Main entry point for the daemon
 pub async fn main() -> Result<()> {
-    // Parse command line arguments to get project path and background mode
+    // Parse command line arguments for global daemon
     let args: Vec<String> = std::env::args().collect();
-    let mut project_path = None;
     let mut background_mode = false;
+    let mut _global_mode = false;
     
     let mut i = 1;
     while i < args.len() {
@@ -290,8 +266,8 @@ pub async fn main() -> Result<()> {
             "--background" | "-b" => {
                 background_mode = true;
             }
-            arg if !arg.starts_with("-") => {
-                project_path = Some(PathBuf::from(arg));
+            "--global" | "-g" => {
+                _global_mode = true;
             }
             _ => {
                 error!("Unknown argument: {}", args[i]);
@@ -301,83 +277,42 @@ pub async fn main() -> Result<()> {
         i += 1;
     }
     
-    // Auto-detect project path if not provided
-    let resolved_project_path = resolve_project_path(project_path);
-    
-    // Check for existing daemon before starting
-    check_existing_daemon(resolved_project_path.as_ref())?;
+    // Check for existing global daemon before starting
+    check_existing_daemon(None)?; // None = global daemon
 
-    // Load configuration to check for log path
-    let config_manager = Arc::new(ConfigManager::new(resolved_project_path.clone())?);
-    let config = config_manager.config().clone();
-
-    // Initialize tracing with appropriate logging based on mode and configuration
-    let _file_guard = if let Some(log_path_str) = &config.daemon.log_path {
-        let log_path = PathBuf::from(log_path_str);
+    // Initialize simple tracing (no config dependency)
+    let _file_guard = if background_mode {
+        // Background mode: log to file in global daemon directory
+        let base_dirs = directories::BaseDirs::new().context("Failed to get base directories")?;
+        let log_dir = base_dirs.home_dir().join(".claude").join("ntfy-service");
+        std::fs::create_dir_all(&log_dir).context("Failed to create log directory")?;
+        let log_path = log_dir.join("daemon.log");
         
-        // Ensure the log directory exists
-        if let Some(parent) = log_path.parent() {
-            std::fs::create_dir_all(parent).context("Failed to create log directory")?;
-        }
         
-        if background_mode {
-            // Background mode: log only to file
-            let file_appender = tracing_appender::rolling::daily(
-                log_path.parent().unwrap_or_else(|| std::path::Path::new(".")),
-                log_path.file_name().unwrap_or_else(|| std::ffi::OsStr::new("daemon.log"))
-            );
-            let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
+        // Background mode: log only to file
+        let file_appender = tracing_appender::rolling::daily(
+            log_path.parent().unwrap_or_else(|| std::path::Path::new(".")),
+            log_path.file_name().unwrap_or_else(|| std::ffi::OsStr::new("daemon.log"))
+        );
+        let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
+        
+        tracing_subscriber::fmt()
+            .with_writer(non_blocking)
+            .with_ansi(false) // Disable colors in file output
+            .with_env_filter(
+                tracing_subscriber::EnvFilter::from_default_env()
+                    .add_directive(tracing::Level::INFO.into()),
+            )
+            .init();
             
-            tracing_subscriber::fmt()
-                .with_writer(non_blocking)
-                .with_ansi(false) // Disable colors in file output
-                .with_env_filter(
-                    tracing_subscriber::EnvFilter::from_default_env()
-                        .add_directive(config.daemon.log_level.parse().unwrap_or(tracing::Level::INFO.into())),
-                )
-                .init();
-                
-            info!("Starting Claude Ntfy daemon in background mode with file logging to: {:?}", log_path);
-            Some(guard)
-        } else {
-            // Foreground mode (default): log to both console and file
-            use tracing_subscriber::prelude::*;
-            
-            // Set up file logging
-            let file_appender = tracing_appender::rolling::daily(
-                log_path.parent().unwrap_or_else(|| std::path::Path::new(".")),
-                log_path.file_name().unwrap_or_else(|| std::ffi::OsStr::new("daemon.log"))
-            );
-            let (file_writer, guard) = tracing_appender::non_blocking(file_appender);
-            
-            // Set up console logging
-            let console_layer = tracing_subscriber::fmt::layer()
-                .with_writer(std::io::stdout);
-                
-            // Set up file logging layer
-            let file_layer = tracing_subscriber::fmt::layer()
-                .with_writer(file_writer)
-                .with_ansi(false); // Disable colors in file output
-            
-            // Combine both layers
-            let env_filter = tracing_subscriber::EnvFilter::from_default_env()
-                .add_directive(config.daemon.log_level.parse().unwrap_or(tracing::Level::INFO.into()));
-            
-            tracing_subscriber::registry()
-                .with(env_filter)
-                .with(console_layer)
-                .with(file_layer)
-                .init();
-                
-            info!("Starting Claude Ntfy daemon in foreground mode with dual logging (console + file: {:?})", log_path);
-            Some(guard)
-        }
+        info!("Starting global Claude Ntfy daemon in background mode with file logging to: {:?}", log_path);
+        Some(guard)
     } else {
-        // No file logging configured, use console only (should only happen in foreground mode)
+        // Foreground mode: console logging only
         tracing_subscriber::fmt()
             .with_env_filter(
                 tracing_subscriber::EnvFilter::from_default_env()
-                    .add_directive(config.daemon.log_level.parse().unwrap_or(tracing::Level::INFO.into())),
+                    .add_directive(tracing::Level::INFO.into()),
             )
             .init();
             
@@ -397,7 +332,7 @@ pub async fn main() -> Result<()> {
     let task_sender_clone = task_sender.clone();
     let shutdown_sender_clone = shutdown_sender.clone();
     let queue_size_clone = queue_size.clone();
-    let socket_path = create_socket_path(resolved_project_path.as_ref())?;
+    let socket_path = create_socket_path(None)?; // Global socket path
     let socket_path_for_ipc = socket_path.clone();
 
     // Create IPC server shutdown channel
@@ -427,7 +362,7 @@ pub async fn main() -> Result<()> {
     info!("Daemon started with PID: {} (PID file: {:?})", current_pid, pid_file);
 
     // Create and run daemon
-    let daemon = NotificationDaemon::new(resolved_project_path.clone(), task_receiver, shutdown_receiver, queue_size)?;
+    let daemon = NotificationDaemon::new(task_receiver, shutdown_receiver, queue_size)?;
     let daemon_result = daemon.run().await;
 
     // Send shutdown signal to IPC server

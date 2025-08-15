@@ -17,7 +17,7 @@ pub mod clients;
 // Re-export commonly used types
 pub use ipc::{IpcClient, IpcServer};
 pub use server::NotificationDaemon;
-pub use shared::{DaemonMessage, DaemonResponse, NotificationTask};
+pub use shared::{DaemonMessage, DaemonResponse, NotificationTask, NtfyTaskConfig};
 
 // Re-export utilities for backward compatibility
 pub use ipc::create_socket_path;

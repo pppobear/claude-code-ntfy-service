@@ -6,7 +6,7 @@
 use super::{Commands, ConfigAction, DaemonAction, CliContext};
 
 // Import daemon types directly
-use crate::daemon::{DaemonMessage, DaemonResponse, NotificationTask, is_process_running, create_socket_path};
+use crate::daemon::{DaemonMessage, DaemonResponse, NotificationTask, NtfyTaskConfig, is_process_running, create_socket_path};
 
 // Simple IPC client for daemon communication
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -275,14 +275,10 @@ impl CommandHandler {
 
     /// Handle daemon start command
     fn handle_daemon_start(&self, detach: bool) -> Result<()> {
-        // Use current directory as default project path to ensure consistency
-        let daemon_project_path = self.context.project_path.clone()
-            .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
-
         if detach {
-            self.start_daemon_detached(daemon_project_path)
+            self.start_daemon_detached()
         } else {
-            self.start_daemon_foreground(daemon_project_path)
+            self.start_daemon_foreground()
         }
     }
 
@@ -427,7 +423,7 @@ impl CommandHandler {
     }
 
     /// Start daemon in detached (background) mode
-    fn start_daemon_detached(&self, daemon_project_path: PathBuf) -> Result<()> {
+    fn start_daemon_detached(&self) -> Result<()> {
         let daemon_binary = if cfg!(debug_assertions) {
             "./target/debug/claude-ntfy-daemon"
         } else {
@@ -436,7 +432,7 @@ impl CommandHandler {
         
         let mut child = process::Command::new(daemon_binary)
             .arg("--background")
-            .arg(daemon_project_path.to_string_lossy().to_string())
+            .arg("--global") // Start as global daemon
             .stdout(process::Stdio::null())  // Redirect stdout to null
             .stderr(process::Stdio::piped())  // Capture stderr for startup errors
             .spawn()?;
@@ -457,7 +453,7 @@ impl CommandHandler {
                 }
                 None => {
                     // Process is still running, check if PID file has been created
-                    let socket_path = create_socket_path(Some(&daemon_project_path))?;
+                    let socket_path = create_socket_path(None)?; // Global socket
                     let pid_file = socket_path.with_extension("pid");
                     if pid_file.exists() {
                         // Daemon started successfully
@@ -486,7 +482,7 @@ impl CommandHandler {
     }
 
     /// Start daemon in foreground mode
-    fn start_daemon_foreground(&self, daemon_project_path: PathBuf) -> Result<()> {
+    fn start_daemon_foreground(&self) -> Result<()> {
         println!("Starting daemon in foreground...");
         
         // Start daemon as child process in same process group (default foreground mode)
@@ -497,7 +493,7 @@ impl CommandHandler {
         };
         
         let mut child = process::Command::new(daemon_binary)
-            .arg(daemon_project_path.to_string_lossy().to_string())
+            .arg("--global") // Start as global daemon
             .spawn()?;
             
         let child_id = child.id();
@@ -609,9 +605,8 @@ fn send_process_signal(child_pid: u32) {
 impl CommandHandler {
     /// Get daemon file paths (pid_file, socket_path)
     fn get_daemon_paths(&self) -> Result<(PathBuf, PathBuf)> {
-        let daemon_project_path = self.context.project_path.clone()
-            .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
-        let socket_path = create_socket_path(Some(&daemon_project_path))?;
+        // Use global socket path for unified daemon
+        let socket_path = create_socket_path(None)?; // None = global path
         let pid_file = socket_path.with_extension("pid");
         Ok((pid_file, socket_path))
     }
@@ -744,16 +739,31 @@ impl CommandHandler {
         hook_name: String,
         hook_data: Value,
     ) -> Result<()> {
-        // For now, fall back to daemon_shared until IPC client is available in CLI context
-        let socket_path = create_socket_path(self.context.project_path.as_ref())?;
+        // Use global socket path for daemon communication
+        let socket_path = create_socket_path(None)?; // None = global socket
         
         // Check if daemon is running (simplified check for now)
         let pid_file = socket_path.with_extension("pid");
         if !pid_file.exists() {
             return Err(anyhow::anyhow!(
-                "Daemon is not running. Start it with 'claude-ntfy daemon start'"
+                "Global daemon is not running. Start it with 'claude-ntfy daemon start --global'"
             ));
         }
+
+        // Get ntfy configuration from project config
+        let config = self.context.config_manager.config();
+        let topic = self.context.config_manager.get_hook_topic(&hook_name);
+        let priority = self.context.config_manager.get_hook_priority(&hook_name);
+
+        // Build ntfy task config from project settings
+        let ntfy_config = NtfyTaskConfig {
+            server_url: config.ntfy.server_url.clone(),
+            topic,
+            priority: Some(priority),
+            tags: config.ntfy.default_tags.clone(),
+            auth_token: config.ntfy.auth_token.clone(),
+            send_format: config.ntfy.send_format.clone(),
+        };
 
         let task = NotificationTask {
             hook_name,
@@ -761,20 +771,22 @@ impl CommandHandler {
                 .context("Failed to serialize hook data")?,
             retry_count: 0,
             timestamp: chrono::Local::now(),
+            ntfy_config,
+            project_path: self.context.project_path.as_ref().map(|p| p.to_string_lossy().to_string()),
         };
 
         // Send to daemon via IPC socket
         match Self::send_task_to_daemon(&socket_path, task).await {
             Ok(()) => {
-                debug!("Hook task sent to daemon successfully");
+                debug!("Hook task sent to global daemon successfully");
             }
             Err(e) => {
-                error!("Failed to send hook task to daemon: {}", e);
+                error!("Failed to send hook task to global daemon: {}", e);
                 return Err(e);
             }
         }
 
-        debug!("Task sent to daemon");
+        debug!("Task sent to global daemon");
         Ok(())
     }
 

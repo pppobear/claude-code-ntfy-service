@@ -13,9 +13,21 @@ extern crate claude_ntfy;
 use claude_ntfy::{
     daemon::{
         ipc::{IpcClient, IpcServer},
-        shared::{NotificationTask},
+        shared::{NotificationTask, NtfyTaskConfig},
     },
 };
+
+/// Helper function to create test ntfy config
+fn create_test_ntfy_config(topic: &str) -> NtfyTaskConfig {
+    NtfyTaskConfig {
+        server_url: "https://ntfy.sh".to_string(),
+        topic: topic.to_string(),
+        priority: Some(3),
+        tags: Some(vec!["test".to_string()]),
+        auth_token: None,
+        send_format: "json".to_string(),
+    }
+}
 
 /// Performance benchmark results
 #[derive(Debug)]
@@ -178,6 +190,8 @@ mod performance_tests {
                     }).to_string(),
                     retry_count: 0,
                     timestamp: chrono::Local::now(),
+                    ntfy_config: create_test_ntfy_config(&format!("benchmark-{}", i)),
+                    project_path: Some("/tmp/benchmark".to_string()),
                 };
                 
                 let op_start = Instant::now();
@@ -281,6 +295,8 @@ mod performance_tests {
                                 hook_data: json!({"conn": conn_id, "op": op_id}).to_string(),
                                 retry_count: 0,
                                 timestamp: chrono::Local::now(),
+                                ntfy_config: create_test_ntfy_config(&format!("conn-{}", conn_id)),
+                                project_path: Some("/tmp/concurrent".to_string()),
                             };
                             client.send_task(task).await.unwrap();
                         }
@@ -399,6 +415,8 @@ mod performance_tests {
                 }).to_string(),
                 retry_count: 0,
                 timestamp: chrono::Local::now(),
+                ntfy_config: create_test_ntfy_config(&format!("memory-test-{}", i / 100)),
+                project_path: Some("/tmp/memory-test".to_string()),
             };
             
             client.send_task(task).await.unwrap();

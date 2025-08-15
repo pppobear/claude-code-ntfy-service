@@ -21,11 +21,23 @@ use claude_ntfy::{
     config::ConfigManager,
     daemon::{
         ipc::{IpcClient, IpcServer},
-        shared::{NotificationTask},
+        shared::{NotificationTask, NtfyTaskConfig},
     },
     hooks::{create_default_processor, HookProcessor},
     templates::TemplateEngine,
 };
+
+/// Helper function to create test ntfy config
+fn create_test_ntfy_config(topic: &str) -> NtfyTaskConfig {
+    NtfyTaskConfig {
+        server_url: "https://ntfy.sh".to_string(),
+        topic: topic.to_string(),
+        priority: Some(3),
+        tags: Some(vec!["test".to_string()]),
+        auth_token: None,
+        send_format: "json".to_string(),
+    }
+}
 
 /// Comprehensive test suite for the refactored architecture
 #[cfg(test)]
@@ -148,6 +160,8 @@ mod integration_tests {
             hook_data: json!({"test": "integration_data"}).to_string(),
             retry_count: 0,
             timestamp: chrono::Local::now(),
+            ntfy_config: create_test_ntfy_config("integration-test"),
+            project_path: Some("/tmp/integration-test".to_string()),
         };
         
         let submit_result = timeout(Duration::from_secs(1), client.send_task(test_task.clone())).await;
@@ -321,6 +335,8 @@ mod integration_tests {
                     hook_data: json!({"index": i}).to_string(),
                     retry_count: 0,
                     timestamp: chrono::Local::now(),
+                    ntfy_config: create_test_ntfy_config(&format!("perf-test-{}", i)),
+                    project_path: Some("/tmp/perf-test".to_string()),
                 };
                 client.send_task(task).await
             });
@@ -354,6 +370,8 @@ mod integration_tests {
                 hook_data: json!({"large_data": "x".repeat(1000)}).to_string(),
                 retry_count: 0,
                 timestamp: chrono::Local::now(),
+                ntfy_config: create_test_ntfy_config(&format!("memory-test-{}", i / 100)),
+                project_path: Some("/tmp/memory-test".to_string()),
             };
             client.send_task(task).await.unwrap();
         }
