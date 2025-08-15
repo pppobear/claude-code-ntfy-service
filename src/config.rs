@@ -37,6 +37,8 @@ pub struct HookConfig {
     pub topics: HashMap<String, String>, // hook_name -> topic
     pub priorities: HashMap<String, u8>, // hook_name -> priority
     pub filters: HashMap<String, Vec<String>>, // hook_name -> filters
+    pub never_filter_decision_hooks: bool, // Always allow decision-requiring hooks
+    pub decision_hook_priority: u8, // Priority for hooks that require user decisions
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -57,6 +59,36 @@ pub struct DaemonConfig {
     pub retry_delay_secs: u64,
 }
 
+impl Config {
+    /// Default hook topics for different hook types
+    fn default_hook_topics() -> HashMap<String, String> {
+        let mut topics = HashMap::new();
+        topics.insert("Notification".to_string(), "claude-decisions".to_string());
+        topics.insert("PreToolUse".to_string(), "claude-tools".to_string());
+        topics.insert("UserPromptSubmit".to_string(), "claude-prompts".to_string());
+        topics
+    }
+    
+    /// Default hook priorities - higher values = higher priority (1-5 scale)
+    fn default_hook_priorities() -> HashMap<String, u8> {
+        let mut priorities = HashMap::new();
+        
+        // Decision-requiring hooks get max priority (5)
+        priorities.insert("Notification".to_string(), 5);
+        priorities.insert("PreToolUse".to_string(), 4); // May require decisions
+        priorities.insert("UserPromptSubmit".to_string(), 4); // May block prompts
+        
+        // Other hooks get lower priority
+        priorities.insert("PostToolUse".to_string(), 3);
+        priorities.insert("SessionStart".to_string(), 2);
+        priorities.insert("Stop".to_string(), 2);
+        priorities.insert("SubagentStop".to_string(), 2);
+        priorities.insert("PreCompact".to_string(), 1);
+        
+        priorities
+    }
+}
+
 impl Default for Config {
     fn default() -> Self {
         Config {
@@ -71,9 +103,11 @@ impl Default for Config {
             },
             hooks: HookConfig {
                 enabled: true,
-                topics: HashMap::new(),
-                priorities: HashMap::new(),
+                topics: Self::default_hook_topics(),
+                priorities: Self::default_hook_priorities(),
                 filters: HashMap::new(),
+                never_filter_decision_hooks: true,
+                decision_hook_priority: 5, // Max priority for decision hooks
             },
             templates: TemplateConfig {
                 use_custom: false,
@@ -371,6 +405,11 @@ impl ConfigManager {
             return false;
         }
 
+        // Never filter decision-requiring hooks if the setting is enabled
+        if self.config.hooks.never_filter_decision_hooks && self.is_decision_requiring_hook(hook_name, hook_data) {
+            return true;
+        }
+
         if let Some(filters) = self.config.hooks.filters.get(hook_name) {
             // Simple filter implementation - can be extended
             for filter in filters {
@@ -389,6 +428,78 @@ impl ConfigManager {
         }
 
         true
+    }
+    
+    /// Check if a hook requires user decisions based on JSON decision control fields
+    pub fn is_decision_requiring_hook(&self, hook_name: &str, hook_data: &serde_json::Value) -> bool {
+        match hook_name {
+            // Notification hooks always require user attention
+            "Notification" => true,
+            
+            // PreToolUse hooks require decisions if they have permission decision fields
+            "PreToolUse" => {
+                // Check for hookSpecificOutput.permissionDecision field
+                if let Some(hook_specific) = hook_data.get("hookSpecificOutput") {
+                    if let Some(permission_decision) = hook_specific.get("permissionDecision") {
+                        if let Some(decision) = permission_decision.as_str() {
+                            return matches!(decision, "allow" | "deny" | "ask");
+                        }
+                    }
+                }
+                
+                // Check for deprecated decision field
+                if let Some(decision) = hook_data.get("decision") {
+                    if let Some(decision_str) = decision.as_str() {
+                        return matches!(decision_str, "approve" | "block");
+                    }
+                }
+                
+                false
+            },
+            
+            // PostToolUse hooks require decisions if they have blocking decision
+            "PostToolUse" => {
+                if let Some(decision) = hook_data.get("decision") {
+                    if let Some(decision_str) = decision.as_str() {
+                        return decision_str == "block";
+                    }
+                }
+                false
+            },
+            
+            // UserPromptSubmit hooks require decisions if they block prompts
+            "UserPromptSubmit" => {
+                if let Some(decision) = hook_data.get("decision") {
+                    if let Some(decision_str) = decision.as_str() {
+                        return decision_str == "block";
+                    }
+                }
+                false
+            },
+            
+            // Stop and SubagentStop hooks require decisions if they block stopping
+            "Stop" | "SubagentStop" => {
+                if let Some(decision) = hook_data.get("decision") {
+                    if let Some(decision_str) = decision.as_str() {
+                        return decision_str == "block";
+                    }
+                }
+                false
+            },
+            
+            _ => false
+        }
+    }
+    
+    /// Get effective priority for a hook, considering decision-requiring status
+    pub fn get_effective_priority(&self, hook_name: &str, hook_data: &serde_json::Value) -> u8 {
+        // If this is a decision-requiring hook, use the decision hook priority
+        if self.is_decision_requiring_hook(hook_name, hook_data) {
+            return self.config.hooks.decision_hook_priority;
+        }
+        
+        // Otherwise use the configured priority for this hook type
+        self.get_hook_priority(hook_name)
     }
 }
 

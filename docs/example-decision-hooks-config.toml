@@ -1,0 +1,97 @@
+# Example Configuration for Decision-Requiring Hook Priorities
+# This configuration demonstrates how to set up the claude-ntfy service
+# to prioritize hooks that require user decisions.
+
+[ntfy]
+server_url = "https://ntfy.sh"
+default_topic = "claude-code-hooks"
+default_priority = 3
+default_tags = ["claude-code"]
+auth_token = ""  # Optional authentication token
+timeout_secs = 30
+send_format = "text"
+
+[hooks]
+enabled = true
+
+# NEW FEATURE: Automatically bypass filters for decision-requiring hooks
+never_filter_decision_hooks = true
+
+# NEW FEATURE: Set maximum priority (5) for hooks that require user decisions
+decision_hook_priority = 5
+
+# Hook-specific topics for better organization
+[hooks.topics]
+# Decision-requiring hooks get dedicated high-priority topics
+Notification = "claude-decisions"          # Always requires user attention
+PreToolUse = "claude-tools"               # May ask for permission
+UserPromptSubmit = "claude-prompts"       # May block sensitive prompts
+
+# Other hooks get standard topics
+PostToolUse = "claude-code-hooks"
+SessionStart = "claude-sessions"
+Stop = "claude-sessions"
+SubagentStop = "claude-sessions"
+PreCompact = "claude-maintenance"
+
+# Hook-specific priorities (1-5 scale, where 5 is highest)
+[hooks.priorities]
+# Decision-requiring hooks automatically get max priority (5) when detected
+# But you can also set base priorities for hook types:
+Notification = 5        # Always high priority - user needs to respond
+PreToolUse = 4          # High priority - may need permission 
+UserPromptSubmit = 4    # High priority - may be blocking sensitive content
+
+# Regular hooks get lower priority
+PostToolUse = 3         # Medium priority - informational
+SessionStart = 2        # Low priority - session management
+Stop = 2               # Low priority - session management  
+SubagentStop = 2       # Low priority - session management
+PreCompact = 1         # Lowest priority - maintenance
+
+# Example filters (optional)
+[hooks.filters]
+# You can still set filters for non-decision hooks
+# Decision hooks will bypass these filters if never_filter_decision_hooks = true
+PostToolUse = ["success"]  # Only notify on successful tool use
+
+[templates]
+use_custom = false
+# Custom templates can be defined here if needed
+
+[daemon]
+enabled = true
+log_level = "info"
+max_queue_size = 1000
+retry_attempts = 3
+retry_delay_secs = 5
+
+# How Decision-Requiring Hook Detection Works:
+#
+# 1. Notification hooks: Always considered decision-requiring
+#    - These are sent when Claude needs permission or is waiting for input
+#
+# 2. PreToolUse hooks: Detected based on JSON decision control fields
+#    - Checks for "hookSpecificOutput.permissionDecision" field (values: "allow", "deny", "ask")
+#    - Also checks deprecated "decision" field (values: "approve", "block")
+#    - Automatically gets decision_hook_priority (5) when detected
+#
+# 3. PostToolUse hooks: Detected based on JSON decision field
+#    - Checks for "decision" field with value "block"
+#    - Automatically gets decision_hook_priority (5) when detected
+#
+# 4. UserPromptSubmit hooks: Detected based on JSON decision field
+#    - Checks for "decision" field with value "block"
+#    - These may be blocked by hooks for security review
+#    - Automatically gets decision_hook_priority (5) when detected
+#
+# 5. Stop/SubagentStop hooks: Detected based on JSON decision field
+#    - Checks for "decision" field with value "block"
+#    - Automatically gets decision_hook_priority (5) when detected
+#
+# Benefits of this configuration:
+# - Decision-requiring hooks never get filtered out
+# - They automatically receive maximum priority (5)
+# - They get sent to dedicated topics for better organization
+# - Detection is based on actual hook JSON output, not content analysis
+# - You still have control over regular hook priorities and filters

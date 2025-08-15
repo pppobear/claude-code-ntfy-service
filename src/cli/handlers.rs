@@ -208,6 +208,16 @@ impl CommandHandler {
                             Some(value.clone())
                         }
                     }
+                    "hooks.never_filter_decision_hooks" => {
+                        config_manager.config_mut().hooks.never_filter_decision_hooks = value.parse()?
+                    }
+                    "hooks.decision_hook_priority" => {
+                        let priority: u8 = value.parse().context("Priority must be a number 1-5")?;
+                        if priority < 1 || priority > 5 {
+                            return Err(anyhow::anyhow!("Priority must be between 1 and 5"));
+                        }
+                        config_manager.config_mut().hooks.decision_hook_priority = priority;
+                    }
                     _ => return Err(anyhow::anyhow!("Unknown configuration key: {}", key)),
                 }
                 config_manager.save()?;
@@ -222,6 +232,12 @@ impl CommandHandler {
                         .as_ref()
                         .cloned()
                         .unwrap_or_else(|| "None".to_string()),
+                    "hooks.never_filter_decision_hooks" => {
+                        config_manager.config().hooks.never_filter_decision_hooks.to_string()
+                    }
+                    "hooks.decision_hook_priority" => {
+                        config_manager.config().hooks.decision_hook_priority.to_string()
+                    }
                     _ => return Err(anyhow::anyhow!("Unknown configuration key: {}", key)),
                 };
                 println!("{value}");
@@ -745,7 +761,7 @@ impl CommandHandler {
         // Get ntfy configuration from project config
         let config = self.context.config_manager.config();
         let topic = self.context.config_manager.get_hook_topic(&hook_name);
-        let priority = self.context.config_manager.get_hook_priority(&hook_name);
+        let priority = self.context.config_manager.get_effective_priority(&hook_name, &hook_data);
 
         // Build ntfy task config from project settings
         let ntfy_config = NtfyTaskConfig {
@@ -893,7 +909,7 @@ impl CommandHandler {
 
         let title = formatter.format_title(&hook_name, &formatted_data);
         let topic = config_manager.get_hook_topic(&hook_name);
-        let priority = config_manager.get_hook_priority(&hook_name);
+        let priority = config_manager.get_effective_priority(&hook_name, &hook_data);
         let tags = formatter
             .get_tags(&hook_name)
             .or_else(|| config.ntfy.default_tags.clone());
