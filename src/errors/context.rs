@@ -185,8 +185,8 @@ where
 /// Macro for adding context to expressions that return Results
 /// 
 /// Usage:
-/// ```rust
-/// use crate::errors::{context, AppError};
+/// ```rust,no_run
+/// use claude_ntfy::{context, errors::AppError};
 /// 
 /// fn example() -> Result<String, AppError> {
 ///     let content = context!(

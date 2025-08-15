@@ -2,6 +2,7 @@ use anyhow::Result;
 
 mod cli;
 mod config;
+mod daemon;
 mod daemon_shared;
 mod errors;
 mod hooks;

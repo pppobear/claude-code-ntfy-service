@@ -13,7 +13,7 @@ pub struct Config {
     pub daemon: DaemonConfig,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct NtfyConfig {
     pub server_url: String,
     pub default_topic: String,

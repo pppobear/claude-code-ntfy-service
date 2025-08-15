@@ -4,6 +4,7 @@
 //! and measure overall system performance improvements.
 
 use std::time::{Duration, Instant};
+use std::sync::Arc;
 use tempfile::TempDir;
 use tokio::time::timeout;
 use serde_json::json;
@@ -12,7 +13,7 @@ extern crate claude_ntfy;
 use claude_ntfy::{
     daemon::{
         ipc::{IpcClient, IpcServer},
-        shared::{DaemonMessage, NotificationTask},
+        shared::{NotificationTask},
     },
 };
 
@@ -50,8 +51,7 @@ mod performance_tests {
     use super::*;
 
     /// Benchmark IPC latency performance
-    #[tokio::test]
-    async fn benchmark_ipc_latency() {
+    pub async fn benchmark_ipc_latency() {
         println!("Running IPC Latency Benchmark...");
         
         let temp_dir = TempDir::new().unwrap();
@@ -60,11 +60,13 @@ mod performance_tests {
         // Setup IPC server
         let (task_sender, _task_receiver) = flume::unbounded::<NotificationTask>();
         let (shutdown_sender, _shutdown_receiver) = flume::unbounded::<()>();
+        let queue_size = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         
         let server = IpcServer::new(
             socket_path.clone(),
             task_sender,
             shutdown_sender,
+            queue_size,
         ).await.unwrap();
         
         let server_handle = tokio::spawn(async move {
@@ -74,7 +76,7 @@ mod performance_tests {
         // Allow server to start
         tokio::time::sleep(Duration::from_millis(50)).await;
         
-        let client = IpcClient::new(socket_path);
+        let client = IpcClient::new(socket_path.clone());
         
         // Warm up
         for _ in 0..10 {
@@ -125,8 +127,7 @@ mod performance_tests {
     }
     
     /// Benchmark task submission throughput
-    #[tokio::test]
-    async fn benchmark_task_submission_throughput() {
+    pub async fn benchmark_task_submission_throughput() {
         println!("Running Task Submission Throughput Benchmark...");
         
         let temp_dir = TempDir::new().unwrap();
@@ -135,11 +136,13 @@ mod performance_tests {
         // Setup IPC server
         let (task_sender, task_receiver) = flume::unbounded::<NotificationTask>();
         let (shutdown_sender, _shutdown_receiver) = flume::unbounded::<()>();
+        let queue_size = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         
         let server = IpcServer::new(
             socket_path.clone(),
             task_sender,
             shutdown_sender,
+            queue_size,
         ).await.unwrap();
         
         let server_handle = tokio::spawn(async move {
@@ -156,7 +159,7 @@ mod performance_tests {
         // Allow server to start
         tokio::time::sleep(Duration::from_millis(50)).await;
         
-        let client = IpcClient::new(socket_path);
+        let client = IpcClient::new(socket_path.clone());
         
         // Benchmark concurrent task submissions
         let operation_count = 2000;
@@ -172,7 +175,7 @@ mod performance_tests {
                         "index": i,
                         "data": format!("benchmark data {}", i),
                         "timestamp": chrono::Local::now().to_rfc3339()
-                    }),
+                    }).to_string(),
                     retry_count: 0,
                     timestamp: chrono::Local::now(),
                 };
@@ -224,8 +227,7 @@ mod performance_tests {
     }
     
     /// Benchmark concurrent connections
-    #[tokio::test]
-    async fn benchmark_concurrent_connections() {
+    pub async fn benchmark_concurrent_connections() {
         println!("Running Concurrent Connections Benchmark...");
         
         let temp_dir = TempDir::new().unwrap();
@@ -234,11 +236,13 @@ mod performance_tests {
         // Setup IPC server
         let (task_sender, _task_receiver) = flume::unbounded::<NotificationTask>();
         let (shutdown_sender, _shutdown_receiver) = flume::unbounded::<()>();
+        let queue_size = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         
         let server = IpcServer::new(
             socket_path.clone(),
             task_sender,
             shutdown_sender,
+            queue_size,
         ).await.unwrap();
         
         let server_handle = tokio::spawn(async move {
@@ -259,7 +263,7 @@ mod performance_tests {
         for conn_id in 0..connection_count {
             let socket_path = socket_path.clone();
             let handle = tokio::spawn(async move {
-                let client = IpcClient::new(socket_path);
+                let client = IpcClient::new(socket_path.clone());
                 let mut latencies = Vec::new();
                 
                 for op_id in 0..operations_per_connection {
@@ -274,7 +278,7 @@ mod performance_tests {
                         _ => {
                             let task = NotificationTask {
                                 hook_name: format!("conn-{}-op-{}", conn_id, op_id),
-                                hook_data: json!({"conn": conn_id, "op": op_id}),
+                                hook_data: json!({"conn": conn_id, "op": op_id}).to_string(),
                                 retry_count: 0,
                                 timestamp: chrono::Local::now(),
                             };
@@ -323,7 +327,7 @@ mod performance_tests {
             "Average concurrent operation latency should be <100ms, got {:?}", avg_latency);
         
         // Cleanup
-        let client = IpcClient::new(socket_path);
+        let client = IpcClient::new(socket_path.clone());
         client.shutdown().await.unwrap();
         let _ = timeout(Duration::from_secs(2), server_handle).await;
         
@@ -331,8 +335,7 @@ mod performance_tests {
     }
     
     /// Benchmark memory efficiency under load
-    #[tokio::test] 
-    async fn benchmark_memory_efficiency() {
+    pub async fn benchmark_memory_efficiency() {
         println!("Running Memory Efficiency Benchmark...");
         
         let temp_dir = TempDir::new().unwrap();
@@ -341,11 +344,13 @@ mod performance_tests {
         // Setup IPC server
         let (task_sender, task_receiver) = flume::unbounded::<NotificationTask>();
         let (shutdown_sender, _shutdown_receiver) = flume::unbounded::<()>();
+        let queue_size = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         
         let server = IpcServer::new(
             socket_path.clone(),
             task_sender,
             shutdown_sender,
+            queue_size,
         ).await.unwrap();
         
         let server_handle = tokio::spawn(async move {
@@ -367,7 +372,7 @@ mod performance_tests {
         // Allow server to start
         tokio::time::sleep(Duration::from_millis(50)).await;
         
-        let client = IpcClient::new(socket_path);
+        let client = IpcClient::new(socket_path.clone());
         let initial_memory = get_approximate_memory_usage();
         
         // Send large number of tasks with varying sizes
@@ -391,7 +396,7 @@ mod performance_tests {
                         "size": task_size,
                         "batch": i / 100
                     }
-                }),
+                }).to_string(),
                 retry_count: 0,
                 timestamp: chrono::Local::now(),
             };

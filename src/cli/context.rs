@@ -152,10 +152,10 @@ mod tests {
 
     #[test]
     fn test_context_validation() {
-        // Test with non-existent path
+        // Test with non-existent path - should fail during construction
         let non_existent = PathBuf::from("/this/path/does/not/exist");
-        let context = CliContext::new(Some(non_existent), false).unwrap();
-        assert!(context.validate().is_err());
+        let context_result = CliContext::new(Some(non_existent), false);
+        assert!(context_result.is_err());
         
         // Test with valid temp dir
         let temp_dir = TempDir::new().unwrap();
@@ -174,8 +174,18 @@ mod tests {
 
     #[test]
     fn test_global_context() {
+        // Create a temporary directory that doesn't have .claude config
+        let temp_dir = TempDir::new().unwrap();
+        
+        // Change to the temp directory to ensure no .claude config is found
+        let original_dir = std::env::current_dir().unwrap();
+        std::env::set_current_dir(temp_dir.path()).unwrap();
+        
         let context = CliContextFactory::create_global(false).unwrap();
         assert!(context.project_path.is_none());
         assert!(!context.verbose);
+        
+        // Restore original directory
+        std::env::set_current_dir(original_dir).unwrap();
     }
 }

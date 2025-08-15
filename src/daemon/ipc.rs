@@ -12,7 +12,7 @@ use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::{mpsc, Mutex};
 use tracing::{debug, error, info, warn};
 
-use crate::shared::{DaemonMessage, DaemonResponse, NotificationTask};
+use crate::daemon::shared::{DaemonMessage, DaemonResponse, NotificationTask};
 
 /// IPC Server for handling Unix socket connections from CLI clients
 pub struct IpcServer {
@@ -491,10 +491,12 @@ mod tests {
         let (shutdown_sender, _shutdown_receiver) = flume::unbounded::<()>();
 
         // Start IPC server
+        let queue_size = Arc::new(AtomicUsize::new(0));
         let server = IpcServer::new(
             socket_path.clone(),
             task_sender,
             shutdown_sender,
+            queue_size,
         ).await.unwrap();
 
         let server_handle = tokio::spawn(async move {
@@ -532,10 +534,12 @@ mod tests {
         let (shutdown_sender, _shutdown_receiver) = flume::unbounded::<()>();
 
         // Start IPC server
+        let queue_size = Arc::new(AtomicUsize::new(0));
         let server = IpcServer::new(
             socket_path.clone(),
             task_sender,
             shutdown_sender,
+            queue_size,
         ).await.unwrap();
 
         let server_handle = tokio::spawn(async move {
@@ -549,7 +553,7 @@ mod tests {
         let client = IpcClient::new(socket_path);
         let task = NotificationTask {
             hook_name: "test-hook".to_string(),
-            hook_data: serde_json::json!({"test": "data"}),
+            hook_data: serde_json::to_string(&serde_json::json!({"test": "data"})).unwrap(),
             retry_count: 0,
             timestamp: chrono::Local::now(),
         };

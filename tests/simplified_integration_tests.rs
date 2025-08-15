@@ -5,7 +5,6 @@
 
 use assert_cmd::Command;
 use predicates::prelude::*;
-use serde_json::json;
 use tempfile::TempDir;
 
 #[cfg(test)]
@@ -250,7 +249,7 @@ mod performance_validation_tests {
                 .arg("--project")
                 .arg(temp_dir.path())
                 .env("CLAUDE_HOOK", "PostToolUse")
-                .write_stdin(&format!(r#"{{"tool_name": "Read", "success": true, "index": {}}}"#, i))
+                .write_stdin(format!(r#"{{"tool_name": "Read", "success": true, "index": {}}}"#, i).as_bytes())
                 .assert()
                 .success();
         }

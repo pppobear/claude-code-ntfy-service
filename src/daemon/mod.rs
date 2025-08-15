@@ -9,6 +9,10 @@
 pub mod ipc;
 pub mod server;
 pub mod shared;
+pub mod config;
+pub mod ntfy;
+pub mod templates;
+pub mod clients;
 
 // Re-export commonly used types
 pub use ipc::{IpcClient, IpcServer};
@@ -17,3 +21,4 @@ pub use shared::{DaemonMessage, DaemonResponse, NotificationTask};
 
 // Re-export utilities for backward compatibility
 pub use ipc::create_socket_path;
+pub use server::is_process_running;

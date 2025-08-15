@@ -44,14 +44,14 @@ fn test_hook_dry_run() {
 
     cmd.arg("hook")
         .arg("--dry-run")
-        .env("CLAUDE_HOOK", "tool-post")
+        .env("CLAUDE_HOOK", "PostToolUse")
         .write_stdin(r#"{"tool_name": "Read", "success": true}"#)
         .assert()
         .success()
         .stdout(predicate::str::contains(
             "Dry run - would send notification",
         ))
-        .stdout(predicate::str::contains("tool-post"));
+        .stdout(predicate::str::contains("PostToolUse"));
 }
 
 #[test]
@@ -62,9 +62,9 @@ fn test_templates_list() {
         .assert()
         .success()
         .stdout(predicate::str::contains("Available templates"))
-        .stdout(predicate::str::contains("tool-post"))
-        .stdout(predicate::str::contains("tool-pre"))
-        .stdout(predicate::str::contains("git-commit"));
+        .stdout(predicate::str::contains("PostToolUse"))
+        .stdout(predicate::str::contains("PreToolUse"))
+        .stdout(predicate::str::contains("generic"));
 }
 
 #[test]

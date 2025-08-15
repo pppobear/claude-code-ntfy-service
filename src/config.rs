@@ -20,7 +20,7 @@ pub struct Config {
 /// Configuration for ntfy notification service integration
 ///
 /// Contains settings for connecting to and sending notifications via ntfy servers.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct NtfyConfig {
     pub server_url: String,
     pub default_topic: String,
@@ -105,17 +105,19 @@ impl Default for Config {
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,no_run
 /// use claude_ntfy::config::ConfigManager;
 /// use std::path::PathBuf;
 ///
-/// // Load project-specific configuration
-/// let config_manager = ConfigManager::new(Some(PathBuf::from("/path/to/project")))?;
-/// 
-/// // Access configuration
-/// let ntfy_config = &config_manager.config().ntfy;
-/// println!("Server URL: {}", ntfy_config.server_url);
-/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// fn main() -> Result<(), Box<dyn std::error::Error>> {
+///     // Load project-specific configuration
+///     let config_manager = ConfigManager::new(Some(PathBuf::from("/path/to/project")))?;
+///     
+///     // Access configuration
+///     let ntfy_config = &config_manager.config().ntfy;
+///     println!("Server URL: {}", ntfy_config.server_url);
+///     Ok(())
+/// }
 /// ```
 pub struct ConfigManager {
     #[allow(dead_code)]

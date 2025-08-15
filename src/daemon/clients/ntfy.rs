@@ -292,6 +292,7 @@ impl AsyncNtfyClient {
             attach: None,
             filename: None,
             delay: None,
+            send_format: "json".to_string(),
             email: None,
             call: None,
             actions: None,
@@ -465,8 +466,8 @@ impl NtfyClient {
 }
 
 // Convert from config types (transitional compatibility)
-impl From<&super::super::config::Config> for NtfyClientConfig {
-    fn from(config: &super::super::config::Config) -> Self {
+impl From<&crate::daemon::config::Config> for NtfyClientConfig {
+    fn from(config: &crate::daemon::config::Config) -> Self {
         Self {
             server_url: config.ntfy.server_url.clone(),
             auth_token: config.ntfy.auth_token.clone(),
@@ -479,8 +480,8 @@ impl From<&super::super::config::Config> for NtfyClientConfig {
 }
 
 // Convert directly from NtfyConfig
-impl From<&super::super::config::NtfyConfig> for NtfyClientConfig {
-    fn from(config: &super::super::config::NtfyConfig) -> Self {
+impl From<&crate::daemon::config::NtfyConfig> for NtfyClientConfig {
+    fn from(config: &crate::daemon::config::NtfyConfig) -> Self {
         Self {
             server_url: config.server_url.clone(),
             auth_token: config.auth_token.clone(),
@@ -537,7 +538,7 @@ mod tests {
     }
     
     #[test]
-    fn test_retry_config() {
+    async fn test_retry_config() {
         let config = RetryConfig::exponential(3, 100);
         assert_eq!(config.max_attempts, 3);
         assert_eq!(config.base_delay_ms, 100);
@@ -548,7 +549,7 @@ mod tests {
     }
     
     #[test]
-    fn test_client_stats() {
+    async fn test_client_stats() {
         let mut stats = ClientStats::default();
         stats.record_success(100);
         stats.record_success(200);

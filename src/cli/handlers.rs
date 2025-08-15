@@ -4,7 +4,9 @@
 //! providing clean separation between CLI parsing and business logic.
 
 use super::{Commands, ConfigAction, DaemonAction, CliContext};
-use crate::daemon_shared;
+
+// Import daemon types directly
+use crate::daemon::{DaemonMessage, DaemonResponse, NotificationTask, is_process_running, create_socket_path};
 
 // Simple IPC client for daemon communication
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -291,7 +293,7 @@ impl CommandHandler {
         match self.check_daemon_process(&pid_file)? {
             Some(pid_num) => {
                 // Try to send shutdown signal via Unix socket IPC first
-                match self.send_daemon_ipc_message(daemon_shared::DaemonMessage::Shutdown).await {
+                match self.send_daemon_ipc_message(DaemonMessage::Shutdown).await {
                     Ok(_) => {
                         println!("Daemon stop signal sent via IPC");
                         
@@ -302,13 +304,13 @@ impl CommandHandler {
 
                         while start_time.elapsed() < timeout {
                             std::thread::sleep(Duration::from_millis(100));
-                            if !daemon_shared::is_process_running(pid_num) {
+                            if !is_process_running(pid_num) {
                                 break;
                             }
                         }
 
                         // Verify process has stopped
-                        if daemon_shared::is_process_running(pid_num) {
+                        if is_process_running(pid_num) {
                             println!("Warning: Daemon may still be running after stop signal");
                         } else {
                             println!("Daemon stopped successfully");
@@ -336,7 +338,7 @@ impl CommandHandler {
                                     // Wait a bit for graceful shutdown
                                     std::thread::sleep(std::time::Duration::from_secs(2));
                                     
-                                    if daemon_shared::is_process_running(pid_num) {
+                                    if is_process_running(pid_num) {
                                         println!("Process still running, sending SIGKILL...");
                                         let _ = std::process::Command::new("kill")
                                             .arg("-KILL")
@@ -373,8 +375,8 @@ impl CommandHandler {
         match self.check_daemon_process(&pid_file)? {
             Some(pid_num) => {
                 // Try to get detailed status via IPC
-                match self.send_daemon_ipc_message(daemon_shared::DaemonMessage::Status).await {
-                    Ok(daemon_shared::DaemonResponse::Status { queue_size, is_running, uptime_secs }) => {
+                match self.send_daemon_ipc_message(DaemonMessage::Status).await {
+                    Ok(DaemonResponse::Status { queue_size, is_running, uptime_secs }) => {
                         println!("Daemon is running (PID: {})", pid_num);
                         println!("  Queue size: {}", queue_size);
                         println!("  Uptime: {} seconds", uptime_secs);
@@ -401,11 +403,11 @@ impl CommandHandler {
         match self.check_daemon_process(&pid_file)? {
             Some(_pid_num) => {
                 // Send reload signal via IPC
-                match self.send_daemon_ipc_message(daemon_shared::DaemonMessage::Reload).await {
-                    Ok(daemon_shared::DaemonResponse::Ok) => {
+                match self.send_daemon_ipc_message(DaemonMessage::Reload).await {
+                    Ok(DaemonResponse::Ok) => {
                         println!("Daemon reload signal sent successfully");
                     }
-                    Ok(daemon_shared::DaemonResponse::Error(e)) => {
+                    Ok(DaemonResponse::Error(e)) => {
                         println!("Daemon reload failed: {}", e);
                     }
                     Ok(_) => {
@@ -455,7 +457,7 @@ impl CommandHandler {
                 }
                 None => {
                     // Process is still running, check if PID file has been created
-                    let socket_path = daemon_shared::create_socket_path(Some(&daemon_project_path))?;
+                    let socket_path = create_socket_path(Some(&daemon_project_path))?;
                     let pid_file = socket_path.with_extension("pid");
                     if pid_file.exists() {
                         // Daemon started successfully
@@ -609,13 +611,13 @@ impl CommandHandler {
     fn get_daemon_paths(&self) -> Result<(PathBuf, PathBuf)> {
         let daemon_project_path = self.context.project_path.clone()
             .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
-        let socket_path = daemon_shared::create_socket_path(Some(&daemon_project_path))?;
+        let socket_path = create_socket_path(Some(&daemon_project_path))?;
         let pid_file = socket_path.with_extension("pid");
         Ok((pid_file, socket_path))
     }
 
     /// Send a message to the daemon via Unix socket IPC
-    async fn send_daemon_ipc_message(&self, message: daemon_shared::DaemonMessage) -> Result<daemon_shared::DaemonResponse> {
+    async fn send_daemon_ipc_message(&self, message: DaemonMessage) -> Result<DaemonResponse> {
         let (_, socket_path) = self.get_daemon_paths()?;
         
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -662,7 +664,7 @@ impl CommandHandler {
             .context("Failed to read response payload")?;
 
         // Deserialize response
-        let response: daemon_shared::DaemonResponse = bincode::deserialize(&response_buffer)
+        let response: DaemonResponse = bincode::deserialize(&response_buffer)
             .context("Failed to deserialize response")?;
 
         Ok(response)
@@ -678,7 +680,7 @@ impl CommandHandler {
         let pid = pid_str.trim();
         
         match pid.parse::<u32>() {
-            Ok(pid_num) if daemon_shared::is_process_running(pid_num) => Ok(Some(pid_num)),
+            Ok(pid_num) if is_process_running(pid_num) => Ok(Some(pid_num)),
             _ => {
                 // Clean up stale/invalid PID file
                 if let Err(e) = std::fs::remove_file(pid_file) {
@@ -743,7 +745,7 @@ impl CommandHandler {
         hook_data: Value,
     ) -> Result<()> {
         // For now, fall back to daemon_shared until IPC client is available in CLI context
-        let socket_path = daemon_shared::create_socket_path(self.context.project_path.as_ref())?;
+        let socket_path = create_socket_path(self.context.project_path.as_ref())?;
         
         // Check if daemon is running (simplified check for now)
         let pid_file = socket_path.with_extension("pid");
@@ -753,7 +755,7 @@ impl CommandHandler {
             ));
         }
 
-        let task = daemon_shared::NotificationTask {
+        let task = NotificationTask {
             hook_name,
             hook_data: serde_json::to_string(&hook_data)
                 .context("Failed to serialize hook data")?,
@@ -779,7 +781,7 @@ impl CommandHandler {
     /// Send a notification task to daemon via IPC socket
     async fn send_task_to_daemon(
         socket_path: &std::path::Path,
-        task: daemon_shared::NotificationTask,
+        task: NotificationTask,
     ) -> Result<()> {
         // Connect to Unix socket
         let mut stream = UnixStream::connect(socket_path)
@@ -787,7 +789,7 @@ impl CommandHandler {
             .context("Failed to connect to daemon socket")?;
 
         // Create message
-        let message = daemon_shared::DaemonMessage::Submit(task);
+        let message = DaemonMessage::Submit(task);
 
         // Serialize message
         let serialized = bincode::serialize(&message)
@@ -825,12 +827,12 @@ impl CommandHandler {
             .context("Failed to read response payload")?;
 
         // Deserialize response
-        let response: daemon_shared::DaemonResponse = bincode::deserialize(&response_buffer)
+        let response: DaemonResponse = bincode::deserialize(&response_buffer)
             .context("Failed to deserialize response")?;
 
         match response {
-            daemon_shared::DaemonResponse::Ok => Ok(()),
-            daemon_shared::DaemonResponse::Error(e) => Err(anyhow::anyhow!("Daemon error: {}", e)),
+            DaemonResponse::Ok => Ok(()),
+            DaemonResponse::Error(e) => Err(anyhow::anyhow!("Daemon error: {}", e)),
             _ => Err(anyhow::anyhow!("Unexpected response: {:?}", response)),
         }
     }

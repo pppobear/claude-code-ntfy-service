@@ -6,22 +6,13 @@ use tokio::signal;
 use tokio::time::{sleep, Duration};
 use tracing::{debug, error, info, warn};
 
-// Since this is a separate binary, we need to include modules directly
-mod config;
-mod ntfy;
-mod templates;
-mod clients;
-
-// Local daemon modules  
-mod ipc;
-mod shared;
-
-use config::ConfigManager;
-use ntfy::NtfyMessage;
-use clients::{create_async_client_from_ntfy_config, traits::NotificationClient};
-use templates::{MessageFormatter, TemplateEngine};
-use ipc::IpcServer;
-use shared::NotificationTask;
+// Import specific items from daemon modules
+use super::config::ConfigManager;
+use super::templates::{MessageFormatter, TemplateEngine};
+use super::clients::{create_async_client_from_ntfy_config, traits::NotificationClient, AsyncNtfyClient};
+use super::ipc::{IpcServer, create_socket_path};
+use super::ntfy::NtfyMessage;
+use super::shared::NotificationTask;
 
 /// Auto-detect project path by looking for .claude/ntfy-service/config.toml
 fn resolve_project_path(project_path: Option<PathBuf>) -> Option<PathBuf> {
@@ -45,7 +36,7 @@ fn resolve_project_path(project_path: Option<PathBuf>) -> Option<PathBuf> {
 
 pub struct NotificationDaemon {
     config_manager: Arc<ConfigManager>,
-    ntfy_client: Arc<clients::AsyncNtfyClient>,
+    ntfy_client: Arc<AsyncNtfyClient>,
     template_engine: Arc<TemplateEngine>,
     message_formatter: Arc<MessageFormatter>,
     task_receiver: Receiver<NotificationTask>,
@@ -269,6 +260,7 @@ impl NotificationDaemon {
             email: None,
             call: None,
             actions: None,
+            send_format: "json".to_string(),
         })
     }
 
@@ -286,8 +278,7 @@ impl NotificationDaemon {
 // DaemonMessage and DaemonResponse are now imported from shared module
 
 // Main entry point for the daemon
-#[tokio::main]
-async fn main() -> Result<()> {
+pub async fn main() -> Result<()> {
     // Parse command line arguments to get project path and background mode
     let args: Vec<String> = std::env::args().collect();
     let mut project_path = None;
@@ -406,7 +397,7 @@ async fn main() -> Result<()> {
     let task_sender_clone = task_sender.clone();
     let shutdown_sender_clone = shutdown_sender.clone();
     let queue_size_clone = queue_size.clone();
-    let socket_path = ipc::create_socket_path(resolved_project_path.as_ref())?;
+    let socket_path = create_socket_path(resolved_project_path.as_ref())?;
     let socket_path_for_ipc = socket_path.clone();
 
     // Create IPC server shutdown channel
@@ -466,7 +457,7 @@ async fn main() -> Result<()> {
 
 // create_socket_path is now provided by the ipc module
 
-fn is_process_running(pid: u32) -> bool {
+pub fn is_process_running(pid: u32) -> bool {
     #[cfg(unix)]
     {
         use std::process::Command;
@@ -498,7 +489,7 @@ fn is_process_running(pid: u32) -> bool {
 }
 
 fn check_existing_daemon(project_path: Option<&PathBuf>) -> Result<()> {
-    let socket_path = ipc::create_socket_path(project_path)?;
+    let socket_path = create_socket_path(project_path)?;
     let pid_file = socket_path.with_extension("pid");
     
     if !pid_file.exists() {

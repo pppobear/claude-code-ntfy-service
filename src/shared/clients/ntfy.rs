@@ -536,8 +536,8 @@ mod tests {
         assert_eq!(body["priority"], 3);
     }
     
-    #[test]
-    fn test_retry_config() {
+    #[tokio::test]
+    async fn test_retry_config() {
         let config = RetryConfig::exponential(3, 100);
         assert_eq!(config.max_attempts, 3);
         assert_eq!(config.base_delay_ms, 100);
@@ -547,8 +547,8 @@ mod tests {
         assert!(delay2 > delay1);
     }
     
-    #[test]
-    fn test_client_stats() {
+    #[tokio::test]
+    async fn test_client_stats() {
         let mut stats = ClientStats::default();
         stats.record_success(100);
         stats.record_success(200);

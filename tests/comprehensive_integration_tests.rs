@@ -7,13 +7,11 @@
 //! 4. Performance improvements (50x IPC improvement)
 //! 5. All functionality maintains 100% compatibility
 
-use anyhow::Result;
 use assert_cmd::Command;
 use predicates::prelude::*;
 use serde_json::{json, Value};
-use std::path::PathBuf;
-use std::process::Stdio;
 use std::time::{Duration, Instant};
+use std::sync::Arc;
 use tempfile::TempDir;
 use tokio::time::timeout;
 
@@ -23,9 +21,9 @@ use claude_ntfy::{
     config::ConfigManager,
     daemon::{
         ipc::{IpcClient, IpcServer},
-        shared::{DaemonMessage, NotificationTask},
+        shared::{NotificationTask},
     },
-    hooks::{create_default_processor, DefaultHookProcessor, ProcessedHook},
+    hooks::{create_default_processor, HookProcessor},
     templates::TemplateEngine,
 };
 
@@ -110,10 +108,12 @@ mod integration_tests {
         let (shutdown_sender, _shutdown_receiver) = flume::unbounded::<()>();
         
         // Start IPC server
+        let queue_size = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let server = IpcServer::new(
             socket_path.clone(),
             task_sender,
             shutdown_sender,
+            queue_size,
         ).await.unwrap();
         
         let server_handle = tokio::spawn(async move {
@@ -135,7 +135,7 @@ mod integration_tests {
         // Test 2: Status operation
         println!("  Testing status operation...");
         let status_result = timeout(Duration::from_secs(1), client.status()).await;
-        assert!(status_result.is_ok() && status_result.unwrap().is_ok());
+        assert!(status_result.is_ok() && status_result.as_ref().unwrap().is_ok());
         let (queue_size, is_running, uptime) = status_result.unwrap().unwrap();
         assert!(is_running);
         assert!(uptime >= 0);
@@ -145,7 +145,7 @@ mod integration_tests {
         println!("  Testing task submission...");
         let test_task = NotificationTask {
             hook_name: "TestHook".to_string(),
-            hook_data: json!({"test": "integration_data"}),
+            hook_data: json!({"test": "integration_data"}).to_string(),
             retry_count: 0,
             timestamp: chrono::Local::now(),
         };
@@ -258,10 +258,12 @@ mod integration_tests {
         let (shutdown_sender, _shutdown_receiver) = flume::unbounded::<()>();
         
         // Start IPC server
+        let queue_size = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let server = IpcServer::new(
             socket_path.clone(),
             task_sender,
             shutdown_sender,
+            queue_size,
         ).await.unwrap();
         
         let server_handle = tokio::spawn(async move {
@@ -271,7 +273,7 @@ mod integration_tests {
         // Give server time to start
         tokio::time::sleep(Duration::from_millis(50)).await;
         
-        let client = IpcClient::new(socket_path);
+        let client = IpcClient::new(socket_path.clone());
         
         // Test 1: Latency performance
         println!("  Testing latency performance (target: <10ms)...");
@@ -316,7 +318,7 @@ mod integration_tests {
             let handle = tokio::spawn(async move {
                 let task = NotificationTask {
                     hook_name: format!("perf-test-{}", i),
-                    hook_data: json!({"index": i}),
+                    hook_data: json!({"index": i}).to_string(),
                     retry_count: 0,
                     timestamp: chrono::Local::now(),
                 };
@@ -349,7 +351,7 @@ mod integration_tests {
         for i in 0..500 {
             let task = NotificationTask {
                 hook_name: format!("memory-test-{}", i),
-                hook_data: json!({"large_data": "x".repeat(1000)}),
+                hook_data: json!({"large_data": "x".repeat(1000)}).to_string(),
                 retry_count: 0,
                 timestamp: chrono::Local::now(),
             };
@@ -405,10 +407,12 @@ mod integration_tests {
                 "parameters": {"file_path": "/test/file.rs"}
             })),
             ("PreTask", json!({
+                "task_id": "task-001",
                 "task_name": "implement_feature",
                 "description": "Add new API endpoint"
             })),
             ("PostTask", json!({
+                "task_id": "task-001",
                 "task_name": "implement_feature",
                 "success": true,
                 "duration_ms": "2500"
@@ -699,11 +703,13 @@ fn create_test_hook_data(hook_name: &str) -> Value {
             }
         }),
         "PreTask" => json!({
+            "task_id": "task-001",
             "task_name": "implement_feature",
             "description": "Add new API endpoint",
             "estimated_duration": "30m"
         }),
         "PostTask" => json!({
+            "task_id": "task-001",
             "task_name": "implement_feature",
             "success": true,
             "duration_ms": "1800000",
@@ -741,7 +747,6 @@ fn create_test_hook_data(hook_name: &str) -> Value {
 fn get_memory_usage() -> usize {
     // Simple memory usage approximation
     // In a real implementation, you might use a more sophisticated method
-    use std::alloc::{GlobalAlloc, Layout, System};
     
     // For testing purposes, return a mock value based on current heap
     let mock_usage = 1024 * 1024 * 10; // 10MB base

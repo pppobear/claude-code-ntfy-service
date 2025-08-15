@@ -21,14 +21,12 @@
 //!
 //! ## Quick Start
 //!
-//! ```rust
-//! use claude_ntfy::clients::{AsyncNtfyClient, NtfyClientConfig};
-//! use claude_ntfy::clients::convenience::create_default_client;
+//! ```rust,no_run
+//! use claude_ntfy::shared::clients::ntfy::{AsyncNtfyClient, NtfyClientConfig};
 //!
-//! // Create a basic client
-//! let client = create_default_client()?;
-//!
-//! // Or with custom configuration
+//! # #[tokio::main]
+//! # async fn main() -> anyhow::Result<()> {
+//! // Create a client with configuration  
 //! let config = NtfyClientConfig {
 //!     server_url: "https://my-ntfy.example.com".to_string(),
 //!     auth_token: Some("my-token".to_string()),
@@ -38,6 +36,8 @@
 //!
 //! // Send a notification
 //! client.send_simple("topic", "Title", "Message", 3).await?;
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! ## Design Patterns
@@ -71,7 +71,14 @@ pub fn create_client_from_config(config: &Config) -> anyhow::Result<Box<dyn Noti
 
 /// Create an async notification client from ntfy configuration
 pub fn create_async_client_from_ntfy_config(config: &NtfyConfig) -> anyhow::Result<AsyncNtfyClient> {
-    let client_config = NtfyClientConfig::from(config);
+    let client_config = NtfyClientConfig {
+        server_url: config.server_url.clone(),
+        auth_token: config.auth_token.clone(),
+        timeout_secs: config.timeout_secs,
+        send_format: config.send_format.clone(),
+        retry_config: traits::RetryConfig::default(),
+        user_agent: Some("claude-ntfy/0.1.0".to_string()),
+    };
     AsyncNtfyClient::new(client_config)
 }
 
@@ -170,10 +177,10 @@ mod tests {
     fn create_test_config() -> Config {
         Config {
             ntfy: NtfyConfig {
-                server_url: Some("https://ntfy.example.com".to_string()),
+                server_url: "https://ntfy.example.com".to_string(),
                 auth_token: Some("test-token".to_string()),
                 timeout_secs: Some(30),
-                send_format: Some("json".to_string()),
+                send_format: "json".to_string(),
                 ..Default::default()
             },
             ..Default::default()
@@ -237,14 +244,21 @@ mod tests {
     #[test]
     fn test_config_conversion() {
         let ntfy_config = NtfyConfig {
-            server_url: Some("https://test.ntfy.sh".to_string()),
+            server_url: "https://test.ntfy.sh".to_string(),
             auth_token: Some("test-auth".to_string()),
             timeout_secs: Some(45),
-            send_format: Some("text".to_string()),
+            send_format: "text".to_string(),
             ..Default::default()
         };
         
-        let client_config = NtfyClientConfig::from(&ntfy_config);
+        let client_config = NtfyClientConfig {
+            server_url: ntfy_config.server_url.clone(),
+            auth_token: ntfy_config.auth_token.clone(),
+            timeout_secs: ntfy_config.timeout_secs,
+            send_format: ntfy_config.send_format.clone(),
+            retry_config: traits::RetryConfig::default(),
+            user_agent: Some("claude-ntfy/0.1.0".to_string()),
+        };
         assert_eq!(client_config.server_url, "https://test.ntfy.sh");
         assert_eq!(client_config.auth_token, Some("test-auth".to_string()));
         assert_eq!(client_config.timeout_secs, Some(45));

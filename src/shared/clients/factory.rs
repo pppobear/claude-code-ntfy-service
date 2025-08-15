@@ -259,10 +259,10 @@ mod tests {
     async fn test_client_creation_from_config() {
         let factory = DefaultClientFactory::new();
         let config = NtfyConfig {
-            server_url: Some("https://ntfy.example.com".to_string()),
+            server_url: "https://ntfy.example.com".to_string(),
             auth_token: Some("test-token".to_string()),
             timeout_secs: Some(45),
-            send_format: Some("text".to_string()),
+            send_format: "text".to_string(),
             ..Default::default()
         };
         
@@ -293,7 +293,12 @@ mod tests {
     #[tokio::test]
     async fn test_mock_factory() {
         let factory = MockClientFactory::new();
-        let config = NtfyConfig::default();
+        let config = NtfyConfig {
+            server_url: "https://ntfy.sh".to_string(),
+            default_topic: "test".to_string(),
+            send_format: "json".to_string(),
+            ..Default::default()
+        };
         let client = factory.create_async_ntfy_client(&config);
         assert!(client.is_ok());
         

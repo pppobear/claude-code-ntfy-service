@@ -317,6 +317,7 @@ mod tests {
             Err(AppError::HookProcessing {
                 hook_name: "test".to_string(),
                 message: "Enhancement failed".to_string(),
+                source: None,
             })
         }
     }
@@ -334,7 +335,7 @@ mod tests {
         fn validate_input(&self, _hook_name: &str, _data: &Value) -> AppResult<()> {
             Err(AppError::HookValidation {
                 hook_name: "test".to_string(),
-                message: "Validation failed".to_string(),
+                reason: "Validation failed".to_string(),
             })
         }
         

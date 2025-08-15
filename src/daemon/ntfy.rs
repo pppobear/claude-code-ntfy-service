@@ -20,6 +20,7 @@ pub struct NtfyMessage {
     pub email: Option<String>,
     pub call: Option<String>,
     pub actions: Option<Vec<NtfyAction>>,
+    pub send_format: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -191,6 +192,7 @@ impl NtfyClient {
             delay: None,
             email: None,
             call: None,
+            send_format: "json".to_string(),
             actions: None,
         };
 

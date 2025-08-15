@@ -3,17 +3,17 @@
 //! This test validates that the unified clients integration maintains 100% functionality
 //! while eliminating code duplication between sync/async implementations.
 
-use claude_ntfy::config::{Config, NtfyConfig};
-use claude_ntfy::clients::{create_sync_client_from_ntfy_config, create_async_client_from_ntfy_config};
+use claude_ntfy::daemon::config::{NtfyConfig};
+use claude_ntfy::daemon::clients::{create_sync_client_from_ntfy_config, create_async_client_from_ntfy_config};
 
 /// Test configuration for validation
 fn create_test_config() -> NtfyConfig {
     NtfyConfig {
-        server_url: Some("https://ntfy.example.com".to_string()),
-        default_topic: Some("test-topic".to_string()),
+        server_url: "https://ntfy.example.com".to_string(),
+        default_topic: "test-topic".to_string(),
         auth_token: Some("test-token".to_string()),
         timeout_secs: Some(30),
-        send_format: Some("json".to_string()),
+        send_format: "json".to_string(),
         ..Default::default()
     }
 }
@@ -53,11 +53,11 @@ fn test_configuration_compatibility() {
     let config = create_test_config();
     
     // Test that configuration conversion works properly
-    assert_eq!(config.server_url, Some("https://ntfy.example.com".to_string()));
-    assert_eq!(config.default_topic, Some("test-topic".to_string()));
+    assert_eq!(config.server_url, "https://ntfy.example.com".to_string());
+    assert_eq!(config.default_topic, "test-topic".to_string());
     assert_eq!(config.auth_token, Some("test-token".to_string()));
     assert_eq!(config.timeout_secs, Some(30));
-    assert_eq!(config.send_format, Some("json".to_string()));
+    assert_eq!(config.send_format, "json".to_string());
     
     println!("✓ Configuration compatibility maintained");
 }
