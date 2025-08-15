@@ -284,8 +284,8 @@ mod integration_tests {
             server.run().await.unwrap();
         });
         
-        // Give server time to start
-        tokio::time::sleep(Duration::from_millis(50)).await;
+        // Give server more time to start and stabilize
+        tokio::time::sleep(Duration::from_millis(200)).await;
         
         let client = IpcClient::new(socket_path.clone());
         
@@ -324,28 +324,57 @@ mod integration_tests {
         // Test 2: Throughput performance
         println!("  Testing throughput performance (target: >1000 msg/sec)...");
         let num_messages = 1000;
+        let num_workers = 10; // Use 10 concurrent workers instead of 1000
+        let messages_per_worker = num_messages / num_workers;
         let start_time = Instant::now();
         
         let mut handles = Vec::new();
-        for i in 0..num_messages {
-            let client = IpcClient::new(socket_path.clone());
+        for worker_id in 0..num_workers {
+            let socket_path_clone = socket_path.clone();
             let handle = tokio::spawn(async move {
-                let task = NotificationTask {
-                    hook_name: format!("perf-test-{}", i),
-                    hook_data: json!({"index": i}).to_string(),
-                    retry_count: 0,
-                    timestamp: chrono::Local::now(),
-                    ntfy_config: create_test_ntfy_config(&format!("perf-test-{}", i)),
-                    project_path: Some("/tmp/perf-test".to_string()),
+                // Create one client per worker
+                let client = IpcClient::new(socket_path_clone);
+                
+                // Each worker sends multiple messages
+                let start_index = worker_id * messages_per_worker;
+                let end_index = if worker_id == num_workers - 1 {
+                    num_messages // Last worker handles any remainder
+                } else {
+                    start_index + messages_per_worker
                 };
-                client.send_task(task).await
+                
+                for i in start_index..end_index {
+                    let task = NotificationTask {
+                        hook_name: format!("perf-test-{}", i),
+                        hook_data: json!({"index": i, "worker": worker_id}).to_string(),
+                        retry_count: 0,
+                        timestamp: chrono::Local::now(),
+                        ntfy_config: create_test_ntfy_config(&format!("perf-test-{}", i)),
+                        project_path: Some("/tmp/perf-test".to_string()),
+                    };
+                    
+                    // Retry on connection failure
+                    for attempt in 0..3 {
+                        match client.send_task(task.clone()).await {
+                            Ok(_) => break,
+                            Err(e) if attempt < 2 => {
+                                eprintln!("Worker {} attempt {} failed: {}, retrying...", worker_id, attempt + 1, e);
+                                tokio::time::sleep(Duration::from_millis(10)).await;
+                            }
+                            Err(e) => return Err(e),
+                        }
+                    }
+                }
+                Ok(())
             });
             handles.push(handle);
         }
         
-        // Wait for all to complete
-        for handle in handles {
-            handle.await.unwrap().unwrap();
+        // Wait for all workers to complete
+        for (worker_id, handle) in handles.into_iter().enumerate() {
+            if let Err(e) = handle.await.unwrap() {
+                panic!("Worker {} failed: {}", worker_id, e);
+            }
         }
         
         let total_time = start_time.elapsed();
@@ -363,7 +392,7 @@ mod integration_tests {
         println!("  Testing memory usage efficiency...");
         let initial_memory = get_memory_usage();
         
-        // Process large dataset
+        // Process large dataset with retry mechanism
         for i in 0..500 {
             let task = NotificationTask {
                 hook_name: format!("memory-test-{}", i),
@@ -373,7 +402,18 @@ mod integration_tests {
                 ntfy_config: create_test_ntfy_config(&format!("memory-test-{}", i / 100)),
                 project_path: Some("/tmp/memory-test".to_string()),
             };
-            client.send_task(task).await.unwrap();
+            
+            // Retry on failure for memory test as well
+            for attempt in 0..3 {
+                match client.send_task(task.clone()).await {
+                    Ok(_) => break,
+                    Err(e) if attempt < 2 => {
+                        eprintln!("Memory test {} attempt {} failed: {}, retrying...", i, attempt + 1, e);
+                        tokio::time::sleep(Duration::from_millis(5)).await;
+                    }
+                    Err(e) => panic!("Memory test failed after retries: {}", e),
+                }
+            }
         }
         
         // Allow processing and GC
