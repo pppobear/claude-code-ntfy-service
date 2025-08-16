@@ -28,3 +28,6 @@ cobertura.xml
 # Cargo.lock is included for binary projects
 # Remove this line if this is a library
 # Cargo.lock
+
+# serena
+.serena/
