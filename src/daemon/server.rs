@@ -205,6 +205,7 @@ impl NotificationDaemon {
             email: None,
             call: None,
             actions: None,
+            markdown: Some(true),
         })
     }
 

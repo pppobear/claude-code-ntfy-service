@@ -57,34 +57,30 @@ impl TemplateEngine {
         // PreToolUse hook - Rich style
         templates.insert(
             "PreToolUse".to_string(),
-            r#"{{#if (eq tool_name "Read")}}📖{{else if (eq tool_name "Write")}}✍️{{else if (eq tool_name "Edit")}}📝{{else if (eq tool_name "Bash")}}💻{{else if (eq tool_name "Grep")}}🔍{{else if (eq tool_name "Glob")}}📁{{else if (eq tool_name "Task")}}🤖{{else}}🔧{{/if}} **Starting {{ tool_name }}**
+            r#"▶️ **{{ tool_name }}** starting
 
-{{#if tool_input.file_path}}📄 **File:** `{{tool_input.file_path}}`{{/if}}
-{{#if tool_input.command}}⚡ **Command:** `{{tool_input.command}}`{{/if}}
-{{#if tool_input.pattern}}🔍 **Pattern:** `{{tool_input.pattern}}`{{/if}}
-{{#if tool_input.description}}📋 **Description:** {{tool_input.description}}{{/if}}
-{{#if cwd}}📂 **Directory:** `{{cwd}}`{{/if}}
+{{#if tool_input.file_path}}📁 `{{tool_input.file_path}}`{{/if}}
+{{#if tool_input.command}}💻 `{{tool_input.command}}`{{/if}}
+{{#if tool_input.pattern}}🔍 `{{tool_input.pattern}}`{{/if}}
+{{#if tool_input.description}}📝 {{tool_input.description}}{{/if}}
+{{#if cwd}}📂 {{cwd}}{{/if}}
 
-⏰ {{timestamp}}"#
+{{timestamp}}"#
                 .to_string(),
         );
 
         // PostToolUse hook - Rich style
         templates.insert(
             "PostToolUse".to_string(),
-            r#"{{#if tool_response.error}}❌ **FAILED:**{{else}}✅ **COMPLETED:**{{/if}} **{{ tool_name }}**
+            r#"{{#if tool_response.error}}❌ **{{ tool_name }}** failed{{else}}✅ **{{ tool_name }}** completed{{/if}}
 
-{{#if tool_response.error}}🚨 **Error Details:**
-```
-{{tool_response.error}}
-```{{else}}✨ **Status:** Success{{/if}}
+{{#if tool_response.error}}Error: {{tool_response.error}}{{/if}}
+{{#if tool_response.filePath}}📁 `{{tool_response.filePath}}`{{/if}}
+{{#if tool_response.content}}{{#if (gt (len tool_response.content) 100)}}📄 Output: {{len tool_response.content}} chars{{else}}📄 `{{tool_response.content}}`{{/if}}{{/if}}
+{{#if duration_ms}}⏱️ {{duration_ms}}ms{{/if}}
+{{#if tool_response.exit_code}}🔢 Exit: {{tool_response.exit_code}}{{/if}}
 
-{{#if tool_response.filePath}}📄 **File:** `{{tool_response.filePath}}`{{/if}}
-{{#if tool_response.content}}📊 **Output:** {{#if (gt (len tool_response.content) 100)}}*Large output ({{len tool_response.content}} chars)*{{else}}`{{tool_response.content}}`{{/if}}{{/if}}
-{{#if duration_ms}}⏱️ **Duration:** {{duration_ms}}ms{{/if}}
-{{#if tool_response.exit_code}}🔢 **Exit Code:** {{tool_response.exit_code}}{{/if}}
-
-⏰ {{timestamp}}"#
+{{timestamp}}"#
                 .to_string(),
         );
 
@@ -97,36 +93,36 @@ impl TemplateEngine {
         // UserPromptSubmit hook
         templates.insert(
             "UserPromptSubmit".to_string(),
-            r#"💬 **User Prompt Submitted**
+            r#"💬 **User prompt**
 
-📝 **Message:** {{prompt}}
-{{#if cwd}}📂 **Directory:** `{{cwd}}`{{/if}}
+{{prompt}}
+{{#if cwd}}📂 {{cwd}}{{/if}}
 
-⏰ {{timestamp}}"#
+{{timestamp}}"#
                 .to_string(),
         );
 
         // SessionStart hook
         templates.insert(
             "SessionStart".to_string(),
-            r#"🚀 **Claude Code Session Started**
+            r#"🚀 **Session started**
 
-{{#if cwd}}📂 **Directory:** `{{cwd}}`{{/if}}
-{{#if session_id}}🔗 **Session ID:** `{{session_id}}`{{/if}}
+{{#if cwd}}📂 {{cwd}}{{/if}}
+{{#if session_id}}🔗 {{session_id}}{{/if}}
 
-⏰ {{timestamp}}"#
+{{timestamp}}"#
                 .to_string(),
         );
 
         // Stop hook
         templates.insert(
             "Stop".to_string(),
-            r#"🛑 **Claude Code Session Ended**
+            r#"🛑 **Session ended**
 
-{{#if session_duration}}⏱️ **Duration:** {{session_duration}}{{/if}}
-{{#if final_status}}📊 **Status:** {{final_status}}{{/if}}
+{{#if session_duration}}⏱️ {{session_duration}}{{/if}}
+{{#if final_status}}📊 {{final_status}}{{/if}}
 
-⏰ {{timestamp}}"#
+{{timestamp}}"#
                 .to_string(),
         );
 
@@ -135,9 +131,9 @@ impl TemplateEngine {
             "generic".to_string(),
             r#"🔔 **{{hook_name}}**
 
-{{#if message}}📝 **Message:** {{message}}{{/if}}
+{{#if message}}{{message}}{{/if}}
 
-⏰ {{timestamp}}"#
+{{timestamp}}"#
                 .to_string(),
         );
     }
@@ -195,9 +191,9 @@ impl MessageFormatter {
 
     fn rich_formatter() -> Self {
         let mut priority_map = HashMap::new();
-        // Rich style - more granular priorities
-        priority_map.insert("SessionStart".to_string(), 3);
-        priority_map.insert("Stop".to_string(), 3);
+        // Rich style - balanced priorities
+        priority_map.insert("SessionStart".to_string(), 2);
+        priority_map.insert("Stop".to_string(), 2);
         priority_map.insert("PreToolUse".to_string(), 2);
         priority_map.insert("PostToolUse".to_string(), 3);
         priority_map.insert("UserPromptSubmit".to_string(), 4);
@@ -205,14 +201,26 @@ impl MessageFormatter {
         priority_map.insert("SubagentStop".to_string(), 2);
 
         let mut tag_map = HashMap::new();
-        // Rich style - emoji-compatible tags
+        // Rich style - clean tags
         tag_map.insert(
             "PreToolUse".to_string(),
-            vec!["wrench".to_string(), "arrow_forward".to_string(), "tools".to_string()],
+            vec!["tool".to_string(), "start".to_string()],
         );
         tag_map.insert(
             "PostToolUse".to_string(),
-            vec!["white_check_mark".to_string(), "tools".to_string(), "done".to_string()],
+            vec!["tool".to_string(), "done".to_string()],
+        );
+        tag_map.insert(
+            "UserPromptSubmit".to_string(),
+            vec!["prompt".to_string(), "user".to_string()],
+        );
+        tag_map.insert(
+            "SessionStart".to_string(),
+            vec!["session".to_string(), "start".to_string()],
+        );
+        tag_map.insert(
+            "Stop".to_string(),
+            vec!["session".to_string(), "end".to_string()],
         );
 
         Self {
@@ -225,24 +233,36 @@ impl MessageFormatter {
 
     fn compact_formatter() -> Self {
         let mut priority_map = HashMap::new();
-        // Compact style - simplified priorities
+        // Compact style - unified priorities
         priority_map.insert("SessionStart".to_string(), 2);
         priority_map.insert("Stop".to_string(), 2);
-        priority_map.insert("PreToolUse".to_string(), 3);
+        priority_map.insert("PreToolUse".to_string(), 2);
         priority_map.insert("PostToolUse".to_string(), 3);
-        priority_map.insert("UserPromptSubmit".to_string(), 3);
-        priority_map.insert("Notification".to_string(), 3);
+        priority_map.insert("UserPromptSubmit".to_string(), 4);
+        priority_map.insert("Notification".to_string(), 4);
         priority_map.insert("SubagentStop".to_string(), 2);
 
         let mut tag_map = HashMap::new();
-        // Compact style - simple descriptive tags
+        // Compact style - minimal tags
         tag_map.insert(
             "PreToolUse".to_string(),
-            vec!["tool".to_string(), "start".to_string()],
+            vec!["tool".to_string()],
         );
         tag_map.insert(
             "PostToolUse".to_string(),
-            vec!["tool".to_string(), "complete".to_string()],
+            vec!["tool".to_string()],
+        );
+        tag_map.insert(
+            "UserPromptSubmit".to_string(),
+            vec!["prompt".to_string()],
+        );
+        tag_map.insert(
+            "SessionStart".to_string(),
+            vec!["session".to_string()],
+        );
+        tag_map.insert(
+            "Stop".to_string(),
+            vec!["session".to_string()],
         );
 
         Self {
@@ -261,13 +281,13 @@ impl MessageFormatter {
     // Format title for notification messages
     pub fn format_title(&self, hook_name: &str, _data: &Value) -> String {
         match hook_name {
-            "PreToolUse" => "🔧 Tool Starting".to_string(),
-            "PostToolUse" => "✅ Tool Completed".to_string(),
-            "UserPromptSubmit" => "💬 User Prompt".to_string(),
-            "SessionStart" => "🚀 Session Started".to_string(),
-            "Stop" => "🛑 Session Ended".to_string(),
-            "SubagentStop" => "🤖 Agent Finished".to_string(),
-            _ => format!("🔔 {}", hook_name),
+            "PreToolUse" => "Tool Starting".to_string(),
+            "PostToolUse" => "Tool Completed".to_string(),
+            "UserPromptSubmit" => "User Prompt".to_string(),
+            "SessionStart" => "Session Started".to_string(),
+            "Stop" => "Session Ended".to_string(),
+            "SubagentStop" => "Agent Finished".to_string(),
+            _ => hook_name.to_string(),
         }
     }
 }

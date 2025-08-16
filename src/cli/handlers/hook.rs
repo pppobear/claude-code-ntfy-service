@@ -282,6 +282,7 @@ impl<'a> HookHandler<'a> {
             email: None,
             call: None,
             actions: None,
+            markdown: Some(true),
         };
 
         // Send notification

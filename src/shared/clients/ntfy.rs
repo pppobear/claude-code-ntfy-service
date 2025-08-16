@@ -198,6 +198,10 @@ impl AsyncNtfyClient {
             body["actions"] = serde_json::json!(actions);
         }
         
+        if let Some(markdown) = message.markdown {
+            body["markdown"] = serde_json::json!(markdown);
+        }
+        
         Ok(body)
     }
     
@@ -216,6 +220,7 @@ impl AsyncNtfyClient {
             email: None,
             call: None,
             actions: None,
+            markdown: Some(true),
         };
         
         self.send(&msg).await
@@ -347,6 +352,7 @@ mod tests {
             title: Some("Test Title".to_string()),
             message: "Test Message".to_string(),
             priority: Some(3),
+            markdown: Some(true),
             ..Default::default()
         };
         
@@ -355,6 +361,7 @@ mod tests {
         assert_eq!(body["message"], "Test Message");
         assert_eq!(body["title"], "Test Title");
         assert_eq!(body["priority"], 3);
+        assert_eq!(body["markdown"], true);
     }
     
     #[tokio::test]

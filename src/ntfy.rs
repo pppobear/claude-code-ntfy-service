@@ -15,6 +15,7 @@ pub struct NtfyMessage {
     pub email: Option<String>,
     pub call: Option<String>,
     pub actions: Option<Vec<NtfyAction>>,
+    pub markdown: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
