@@ -19,7 +19,7 @@ Thumbs.db
 .claude/settings.local.json
 
 # Logs
-*.log
+logs/
 
 # Test coverage
 tarpaulin-report.html

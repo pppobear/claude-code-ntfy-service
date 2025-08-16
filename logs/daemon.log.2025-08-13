@@ -1,7 +1,0 @@
-2025-08-13T13:42:44.397486Z  INFO claude_ntfy_daemon: Starting Claude Ntfy daemon in foreground mode with dual logging (console + file: "logs/daemon.log")
-2025-08-13T13:42:44.399391Z  INFO claude_ntfy_daemon: IPC server listening on "/Users/suyihang/Projects/projects/claude-code-ntfy-service/.claude/ntfy-service/daemon.sock"
-2025-08-13T13:42:44.414046Z  INFO claude_ntfy_daemon: Notification daemon started
-2025-08-13T13:42:46.338235Z  INFO claude_ntfy_daemon: Received shutdown command via IPC
-2025-08-13T13:42:46.338299Z  INFO claude_ntfy_daemon: Received IPC shutdown signal, stopping daemon
-2025-08-13T13:42:46.338313Z  INFO claude_ntfy_daemon: Draining remaining notification queue
-2025-08-13T13:42:46.338319Z  INFO claude_ntfy_daemon: Notification daemon stopped
