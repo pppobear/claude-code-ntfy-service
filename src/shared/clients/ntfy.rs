@@ -3,7 +3,6 @@ use reqwest::{Client, header::{HeaderMap, HeaderValue, AUTHORIZATION, CONTENT_TY
 use anyhow::{Context, Result};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use url::Url;
 use tokio::time::sleep;
 
 use super::traits::{NotificationClient, ClientStats, RetryConfig};
@@ -15,7 +14,6 @@ pub struct NtfyClientConfig {
     pub server_url: String,
     pub auth_token: Option<String>,
     pub timeout_secs: Option<u64>,
-    pub send_format: String,
     pub retry_config: RetryConfig,
     pub user_agent: Option<String>,
 }
@@ -26,7 +24,6 @@ impl Default for NtfyClientConfig {
             server_url: "https://ntfy.sh".to_string(),
             auth_token: None,
             timeout_secs: Some(30),
-            send_format: "json".to_string(),
             retry_config: RetryConfig::default(),
             user_agent: Some("claude-ntfy/0.1.0".to_string()),
         }
@@ -105,14 +102,9 @@ impl AsyncNtfyClient {
     
     /// Internal send implementation without retry logic
     async fn send_internal(&self, message: &NtfyMessage) -> Result<()> {
-        let url = self.build_url(&message.topic)?;
         let headers = self.build_headers()?;
         
-        let response = if self.config.send_format == "json" {
-            self.send_json(url, headers, message).await?
-        } else {
-            self.send_text(url, headers, message).await?
-        };
+        let response = self.send_json(headers, message).await?;
         
         if !response.status().is_success() {
             let status = response.status();
@@ -127,12 +119,12 @@ impl AsyncNtfyClient {
     }
     
     /// Send notification as JSON
-    async fn send_json(&self, url: String, mut headers: HeaderMap, message: &NtfyMessage) -> Result<reqwest::Response> {
+    async fn send_json(&self, mut headers: HeaderMap, message: &NtfyMessage) -> Result<reqwest::Response> {
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
         let body = self.build_json_body(message)?;
         
         self.client
-            .post(&url)
+            .post(&self.config.server_url)
             .headers(headers)
             .json(&body)
             .send()
@@ -140,21 +132,6 @@ impl AsyncNtfyClient {
             .context("Failed to send JSON notification")
     }
     
-    /// Send notification as plain text with headers
-    async fn send_text(&self, url: String, mut headers: HeaderMap, message: &NtfyMessage) -> Result<reqwest::Response> {
-        headers.insert(CONTENT_TYPE, HeaderValue::from_static("text/plain; charset=utf-8"));
-        
-        // Add ntfy-specific headers
-        self.add_ntfy_headers(&mut headers, message)?;
-        
-        self.client
-            .post(&url)
-            .headers(headers)
-            .body(message.message.clone())
-            .send()
-            .await
-            .context("Failed to send text notification")
-    }
     
     /// Build common headers (auth, etc.)
     fn build_headers(&self) -> Result<HeaderMap> {
@@ -172,65 +149,12 @@ impl AsyncNtfyClient {
         Ok(headers)
     }
     
-    /// Add ntfy-specific headers for text mode
-    fn add_ntfy_headers(&self, headers: &mut HeaderMap, message: &NtfyMessage) -> Result<()> {
-        if let Some(title) = &message.title {
-            headers.insert(
-                "X-Title",
-                HeaderValue::from_str(title).context("Invalid title value")?,
-            );
-        }
-        
-        if let Some(priority) = message.priority {
-            headers.insert(
-                "X-Priority",
-                HeaderValue::from_str(&priority.to_string())
-                    .context("Invalid priority value")?,
-            );
-        }
-        
-        if let Some(tags) = &message.tags {
-            let tags_str = tags.join(",");
-            headers.insert(
-                "X-Tags",
-                HeaderValue::from_str(&tags_str).context("Invalid tags value")?,
-            );
-        }
-        
-        // Add other optional headers
-        if let Some(click) = &message.click {
-            headers.insert("X-Click", HeaderValue::from_str(click)?);
-        }
-        
-        if let Some(attach) = &message.attach {
-            headers.insert("X-Attach", HeaderValue::from_str(attach)?);
-        }
-        
-        if let Some(delay) = &message.delay {
-            headers.insert("X-Delay", HeaderValue::from_str(delay)?);
-        }
-        
-        if let Some(email) = &message.email {
-            headers.insert("X-Email", HeaderValue::from_str(email)?);
-        }
-        
-        if let Some(call) = &message.call {
-            headers.insert("X-Call", HeaderValue::from_str(call)?);
-        }
-        
-        Ok(())
-    }
     
-    /// Build URL for the given topic
-    fn build_url(&self, topic: &str) -> Result<String> {
-        let base = Url::parse(&self.config.server_url).context("Invalid base URL")?;
-        let url = base.join(topic).context("Failed to build topic URL")?;
-        Ok(url.to_string())
-    }
     
     /// Build JSON body for the message
     fn build_json_body(&self, message: &NtfyMessage) -> Result<serde_json::Value> {
         let mut body = serde_json::json!({
+            "topic": message.topic,
             "message": message.message,
         });
         
@@ -376,7 +300,6 @@ impl From<&crate::shared::config::NtfyConfig> for NtfyClientConfig {
             server_url: config.server_url.clone(),
             auth_token: config.auth_token.clone(),
             timeout_secs: config.timeout_secs,
-            send_format: config.send_format.clone(),
             retry_config: RetryConfig::default(),
             user_agent: Some("claude-ntfy/0.1.0".to_string()),
         }
@@ -389,7 +312,6 @@ pub fn create_async_client_from_ntfy_config(config: &crate::config::NtfyConfig) 
         server_url: config.server_url.clone(),
         auth_token: config.auth_token.clone(),
         timeout_secs: config.timeout_secs,
-        send_format: config.send_format.clone(),
         retry_config: RetryConfig::default(),
         user_agent: Some("claude-ntfy/0.1.0".to_string()),
     };
@@ -414,16 +336,6 @@ mod tests {
         assert!(client.is_ok());
     }
     
-    #[test] 
-    async fn test_url_building() {
-        let config = NtfyClientConfig {
-            server_url: "https://ntfy.example.com".to_string(),
-            ..Default::default()
-        };
-        let client = AsyncNtfyClient::new(config).unwrap();
-        let url = client.build_url("test-topic").unwrap();
-        assert_eq!(url, "https://ntfy.example.com/test-topic");
-    }
     
     #[test]
     async fn test_json_body_building() {
@@ -439,6 +351,7 @@ mod tests {
         };
         
         let body = client.build_json_body(&message).unwrap();
+        assert_eq!(body["topic"], "test");
         assert_eq!(body["message"], "Test Message");
         assert_eq!(body["title"], "Test Title");
         assert_eq!(body["priority"], 3);

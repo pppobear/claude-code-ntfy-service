@@ -54,7 +54,6 @@ mod tests {
             server_url: "https://ntfy.example.com".to_string(),
             auth_token: Some("test-token".to_string()),
             timeout_secs: Some(30),
-            send_format: "json".to_string(),
             ..Default::default()
         }
     }

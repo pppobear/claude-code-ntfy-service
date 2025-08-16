@@ -9,13 +9,6 @@ use serde::{Deserialize, Serialize};
 // Constants
 // =============================================================================
 
-/// Supported notification send formats
-pub mod send_format {
-    pub const TEXT: &str = "text";
-    
-    /// Default send format
-    pub const DEFAULT: &str = TEXT;
-}
 
 /// Default values for configuration
 pub mod defaults {
@@ -48,9 +41,6 @@ pub struct NtfyTaskConfig {
     
     /// Authentication token for private topics
     pub auth_token: Option<String>,
-    
-    /// Message format: "text" or "json"
-    pub send_format: String,
 }
 
 impl NtfyTaskConfig {
@@ -62,7 +52,6 @@ impl NtfyTaskConfig {
             priority: Some(defaults::PRIORITY),
             tags: None,
             auth_token: None,
-            send_format: send_format::DEFAULT.to_string(),
         }
     }
     

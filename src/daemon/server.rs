@@ -156,7 +156,6 @@ impl NotificationDaemon {
             server_url: config.server_url.clone(),
             auth_token: config.auth_token.clone(),
             timeout_secs: Some(30), // Default timeout
-            send_format: config.send_format.clone(),
             retry_config: RetryConfig::exponential(3, 1000), // 3 retries, 1s base delay
             user_agent: Some("claude-ntfy-service".to_string()),
         };

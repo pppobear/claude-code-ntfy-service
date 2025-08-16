@@ -13,7 +13,6 @@ fn create_test_config() -> NtfyConfig {
         default_topic: "test-topic".to_string(),
         auth_token: Some("test-token".to_string()),
         timeout_secs: Some(30),
-        send_format: "json".to_string(),
         ..Default::default()
     }
 }
@@ -57,7 +56,6 @@ fn test_configuration_compatibility() {
     assert_eq!(config.default_topic, "test-topic".to_string());
     assert_eq!(config.auth_token, Some("test-token".to_string()));
     assert_eq!(config.timeout_secs, Some(30));
-    assert_eq!(config.send_format, "json".to_string());
     
     println!("✓ Configuration compatibility maintained");
 }

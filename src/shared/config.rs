@@ -25,7 +25,6 @@ pub struct NtfyConfig {
     pub default_tags: Option<Vec<String>>,
     pub auth_token: Option<String>,
     pub timeout_secs: Option<u64>,
-    pub send_format: String, // "text" or "json"
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -106,7 +105,6 @@ impl Default for Config {
                 default_tags: Some(vec!["claude-code".to_string()]),
                 auth_token: None,
                 timeout_secs: Some(30),
-                send_format: "text".to_string(), // Default to text for better compatibility
             },
             hooks: HookConfig {
                 enabled: true,

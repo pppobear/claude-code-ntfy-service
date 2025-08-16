@@ -186,7 +186,6 @@ impl<'a> HookHandler<'a> {
             priority: Some(priority),
             tags: config.ntfy.default_tags.clone(),
             auth_token: config.ntfy.auth_token.clone(),
-            send_format: config.ntfy.send_format.clone(),
         };
 
         let task = NotificationTask {
