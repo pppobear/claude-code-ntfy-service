@@ -5,7 +5,7 @@ use tokio::time::{sleep, Duration};
 use tracing::{debug, error, info, warn};
 
 // Import specific items from daemon modules
-use super::templates::{MessageFormatter, TemplateEngine};
+use crate::shared::templates::{MessageFormatter, TemplateEngine, TemplateStyle};
 use crate::shared::clients::{traits::NotificationClient, AsyncNtfyClient};
 use crate::ntfy::NtfyMessage;
 use super::shared::NotificationTask;
@@ -29,8 +29,8 @@ impl NotificationDaemon {
         shutdown_receiver: Receiver<()>,
         queue_size: Arc<AtomicUsize>,
     ) -> Result<Self> {
-        let template_engine = Arc::new(TemplateEngine::new()?);
-        let message_formatter = Arc::new(MessageFormatter::default());
+        let template_engine = Arc::new(TemplateEngine::new_with_style(TemplateStyle::Compact)?);
+        let message_formatter = Arc::new(MessageFormatter::new(TemplateStyle::Compact));
 
         Ok(NotificationDaemon {
             template_engine,
@@ -173,11 +173,11 @@ impl NotificationDaemon {
         let template_name = task.hook_name.replace('_', "-");
         let formatted_data = self
             .template_engine
-            .format_hook_data(&task.hook_name, &hook_data);
+            .format_hook_data(&task.hook_name, hook_data);
 
         // Use default template rendering (no custom templates in global daemon)
         let body = self.template_engine
-            .render(&template_name, &formatted_data, None)
+            .render(&template_name, &formatted_data)
             .unwrap_or_else(|_| {
                 // Fallback to simple message if template fails
                 format!("Hook: {}\nData: {}", task.hook_name, hook_data)

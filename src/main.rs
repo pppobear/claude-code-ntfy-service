@@ -6,7 +6,6 @@ mod daemon;
 mod errors;
 mod hooks;
 mod ntfy;
-mod templates;
 mod shared;
 
 use cli::CliApp;

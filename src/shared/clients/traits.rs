@@ -1,4 +1,3 @@
-#![allow(dead_code)]
 
 use async_trait::async_trait;
 use anyhow::Result;
@@ -11,18 +10,6 @@ use crate::ntfy::NtfyMessage;
 pub trait NotificationClient: Send + Sync {
     /// Send a notification message
     async fn send(&self, message: &NtfyMessage) -> Result<()>;
-    
-    /// Validate client configuration (connectivity, auth, etc.)
-    async fn validate_config(&self) -> Result<()>;
-    
-    /// Perform health check against the service
-    async fn health_check(&self) -> Result<()>;
-    
-    /// Get client performance statistics
-    fn get_stats(&self) -> ClientStats;
-    
-    /// Get client configuration info
-    fn get_config_info(&self) -> ClientConfigInfo;
 }
 
 /// Performance and usage statistics for notification clients
@@ -42,8 +29,6 @@ pub struct ClientStats {
     pub last_error: Option<String>,
     /// Total number of retry attempts made
     pub retry_attempts: u64,
-    /// Client uptime duration
-    pub uptime: Duration,
 }
 
 impl Default for ClientStats {
@@ -56,7 +41,6 @@ impl Default for ClientStats {
             max_latency_ms: 0,
             last_error: None,
             retry_attempts: 0,
-            uptime: Duration::new(0, 0),
         }
     }
 }
@@ -85,33 +69,8 @@ impl ClientStats {
         self.retry_attempts += 1;
     }
     
-    /// Get success rate as a percentage
-    pub fn success_rate(&self) -> f64 {
-        let total = self.messages_sent + self.messages_failed;
-        if total == 0 {
-            0.0
-        } else {
-            (self.messages_sent as f64 / total as f64) * 100.0
-        }
-    }
 }
 
-/// Configuration information for a notification client
-#[derive(Debug, Clone)]
-pub struct ClientConfigInfo {
-    /// Server URL being used
-    pub server_url: String,
-    /// Whether authentication is configured
-    pub has_auth: bool,
-    /// Send format preference (text/json)
-    pub send_format: String,
-    /// Configured timeout in seconds
-    pub timeout_secs: u64,
-    /// Maximum retry attempts
-    pub max_retries: u32,
-    /// Retry delay in milliseconds
-    pub retry_delay_ms: u64,
-}
 
 /// Retry configuration for notification clients
 #[derive(Debug, Clone)]
@@ -164,14 +123,4 @@ impl RetryConfig {
         }
     }
     
-    /// Create a retry config with linear backoff
-    pub fn linear(max_attempts: u32, delay_ms: u64) -> Self {
-        Self {
-            max_attempts,
-            base_delay_ms: delay_ms,
-            max_delay_ms: delay_ms,
-            backoff_multiplier: 1.0,
-            jitter_factor: 0.0,
-        }
-    }
 }

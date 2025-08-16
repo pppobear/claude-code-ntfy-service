@@ -41,14 +41,6 @@ impl DefaultHookDataEnhancer {
         }
     }
     
-    /// Create a new DefaultHookDataEnhancer with custom settings
-    #[allow(dead_code)]
-    pub fn with_config(infer_success_field: bool, add_timestamps: bool) -> Self {
-        Self {
-            infer_success_field,
-            add_timestamps,
-        }
-    }
     
     /// Enhance PostToolUse hook data
     /// 
@@ -118,7 +110,7 @@ impl DefaultHookDataEnhancer {
         
         // Check for output content (presence usually indicates success)
         if let Some(output) = tool_response.get("output") {
-            if !output.is_null() && output.as_str().map_or(true, |s| !s.trim().is_empty()) {
+            if !output.is_null() && output.as_str().is_none_or(|s| !s.trim().is_empty()) {
                 return true;
             }
         }

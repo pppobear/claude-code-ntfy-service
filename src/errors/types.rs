@@ -21,15 +21,6 @@ pub enum AppError {
     },
     
 
-    // Hook processing errors
-    #[error("Hook processing failed for '{hook_name}': {message}")]
-    #[allow(dead_code)]
-    HookProcessing {
-        hook_name: String,
-        message: String,
-        #[source]
-        source: Option<Box<dyn std::error::Error + Send + Sync>>,
-    },
     
     
     #[error("Hook data size ({size} bytes) exceeds limit ({limit} bytes) for '{hook_name}'")]
@@ -93,16 +84,6 @@ impl AppError {
     }
     
     
-    /// Create a new I/O error
-    #[allow(dead_code)]
-    pub fn io(path: impl Into<PathBuf>, operation: impl Into<String>) -> Self {
-        Self::Io {
-            path: path.into(),
-            operation: operation.into(),
-            source: None,
-        }
-    }
-    
     /// Create a new I/O error with source
     pub fn io_with_source(
         path: impl Into<PathBuf>,
@@ -113,25 +94,6 @@ impl AppError {
             path: path.into(),
             operation: operation.into(),
             source: Some(Box::new(source)),
-        }
-    }
-    
-    
-    /// Check if this error is retryable (useful for notification sending)
-    #[allow(dead_code)]
-    pub fn is_retryable(&self) -> bool {
-        // With current remaining error types, none are considered retryable
-        false
-    }
-    
-    /// Get the error category for metrics and logging
-    #[allow(dead_code)]
-    pub fn category(&self) -> &'static str {
-        match self {
-            Self::Config { .. } => "config",
-            Self::HookProcessing { .. } | Self::HookDataSizeLimit { .. } | Self::HookNotAllowed { .. } | Self::ValidationError(_) => "hook",
-            Self::Io { .. } => "io",
-            Self::Other { .. } => "internal",
         }
     }
 }
@@ -167,23 +129,6 @@ mod tests {
         assert_eq!(err.to_string(), "Configuration error: test config error");
     }
     
-    #[test]
-    fn test_error_category() {
-        let config_err = AppError::config("test");
-        assert_eq!(config_err.category(), "config");
-        
-        let validation_err = AppError::ValidationError("test".to_string());
-        assert_eq!(validation_err.category(), "hook");
-    }
-    
-    #[test]
-    fn test_retryable_errors() {
-        let config_err = AppError::config("test");
-        assert!(!config_err.is_retryable());
-        
-        let validation_err = AppError::ValidationError("test".to_string());
-        assert!(!validation_err.is_retryable());
-    }
     
     #[test]
     fn test_io_error_conversion() {
@@ -194,7 +139,7 @@ mod tests {
             AppError::Io { operation, .. } => {
                 assert_eq!(operation, "file not found");
             },
-            _ => panic!("Wrong error type"),
+            _ => assert!(false, "Expected AppError::Io, got {:?}", app_err),
         }
     }
 }

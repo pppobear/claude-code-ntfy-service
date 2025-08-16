@@ -10,8 +10,6 @@ pub mod ipc;
 pub mod ipc_server;
 pub mod server;
 pub mod shared;
-pub mod config;
-pub mod templates;
 
 // Re-export commonly used types
 pub use shared::{DaemonMessage, DaemonResponse, NotificationTask, NtfyTaskConfig};

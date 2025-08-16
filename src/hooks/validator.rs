@@ -74,25 +74,6 @@ impl DefaultHookValidator {
         }
     }
     
-    /// Create a new DefaultHookValidator with custom settings
-    #[allow(dead_code)]
-    pub fn with_config(
-        max_depth: usize,
-        max_string_length: usize,
-        forbidden_fields: HashSet<String>,
-    ) -> Self {
-        let mut required_fields = std::collections::HashMap::new();
-        required_fields.insert("PostToolUse".to_string(), vec![]);
-        required_fields.insert("PreTask".to_string(), vec!["task_id".to_string()]);
-        required_fields.insert("PostTask".to_string(), vec!["task_id".to_string()]);
-        
-        Self {
-            max_depth,
-            max_string_length,
-            forbidden_fields,
-            required_fields,
-        }
-    }
     
     /// Validate JSON structure and depth
     fn validate_json_structure(&self, data: &Value, current_depth: usize) -> AppResult<()> {
@@ -109,8 +90,7 @@ impl DefaultHookValidator {
                     // Check for forbidden field names
                     if self.forbidden_fields.contains(&key.to_lowercase()) {
                         return Err(AppError::ValidationError(format!(
-                            "Field '{}' is forbidden for security reasons",
-                            key
+                            "Field '{key}' is forbidden for security reasons"
                         )));
                     }
                     
@@ -292,7 +272,6 @@ impl HookValidator for DefaultHookValidator {
 mod tests {
     use super::*;
     use serde_json::json;
-    use chrono::Utc;
     use crate::hooks::types::{HookMetadata, SystemInfo, ClaudeEnvironment};
     
     #[test]
@@ -377,26 +356,4 @@ mod tests {
         assert!(result.unwrap_err().to_string().contains("invalid characters"));
     }
     
-    #[test]
-    fn test_max_depth_validation() {
-        let validator = DefaultHookValidator::with_config(
-            2, // max_depth = 2
-            1000,
-            HashSet::new(),
-        );
-        
-        let data = json!({
-            "level1": {
-                "level2": {
-                    "level3": {
-                        "level4": "too deep"
-                    }
-                }
-            }
-        });
-        
-        let result = validator.validate_input("PostToolUse", &data);
-        assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("maximum depth"));
-    }
 }

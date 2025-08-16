@@ -183,22 +183,6 @@ impl ProcessedHook {
         }
     }
     
-    /// Get a field from the enhanced data
-    #[allow(dead_code)]
-    pub fn get_enhanced_field(&self, field: &str) -> Option<&Value> {
-        self.enhanced_data.get(field)
-    }
-    
-    /// Check if this hook was successful (for PostToolUse hooks)
-    #[allow(dead_code)]
-    pub fn is_successful(&self) -> Option<bool> {
-        if self.hook_name == "PostToolUse" {
-            self.get_enhanced_field("success")
-                .and_then(|v| v.as_bool())
-        } else {
-            None
-        }
-    }
 }
 
 impl SystemInfo {

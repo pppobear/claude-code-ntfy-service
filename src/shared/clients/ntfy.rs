@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use async_trait::async_trait;
 use reqwest::{Client, header::{HeaderMap, HeaderValue, AUTHORIZATION, CONTENT_TYPE}};
 use anyhow::{Context, Result};
@@ -8,7 +6,7 @@ use std::time::{Duration, Instant};
 use url::Url;
 use tokio::time::sleep;
 
-use super::traits::{NotificationClient, ClientStats, ClientConfigInfo, RetryConfig};
+use super::traits::{NotificationClient, ClientStats, RetryConfig};
 use crate::ntfy::NtfyMessage;
 
 /// Configuration for the ntfy client
@@ -41,7 +39,6 @@ pub struct AsyncNtfyClient {
     client: Client,
     config: NtfyClientConfig,
     stats: Arc<Mutex<ClientStats>>,
-    created_at: Instant,
 }
 
 impl AsyncNtfyClient {
@@ -64,14 +61,12 @@ impl AsyncNtfyClient {
             .build()
             .context("Failed to create async HTTP client")?;
         
-        let created_at = Instant::now();
         let stats = Arc::new(Mutex::new(ClientStats::default()));
         
         Ok(Self {
             client,
             config,
             stats,
-            created_at,
         })
     }
     
@@ -322,50 +317,6 @@ impl NotificationClient for AsyncNtfyClient {
         
         result
     }
-    
-    async fn validate_config(&self) -> Result<()> {
-        // Validate server URL format
-        Url::parse(&self.config.server_url).context("Invalid server URL")?;
-        
-        // Test connectivity with a minimal health check
-        self.health_check().await
-    }
-    
-    async fn health_check(&self) -> Result<()> {
-        let health_url = format!("{}/v1/health", self.config.server_url);
-        
-        let response = self.client
-            .get(&health_url)
-            .send()
-            .await
-            .context("Health check request failed")?;
-        
-        if response.status().is_success() {
-            Ok(())
-        } else {
-            anyhow::bail!("Health check failed: HTTP {}", response.status())
-        }
-    }
-    
-    fn get_stats(&self) -> ClientStats {
-        if let Ok(mut stats) = self.stats.lock() {
-            stats.uptime = self.created_at.elapsed();
-            stats.clone()
-        } else {
-            ClientStats::default()
-        }
-    }
-    
-    fn get_config_info(&self) -> ClientConfigInfo {
-        ClientConfigInfo {
-            server_url: self.config.server_url.clone(),
-            has_auth: self.config.auth_token.is_some(),
-            send_format: self.config.send_format.clone(),
-            timeout_secs: self.config.timeout_secs.unwrap_or(30),
-            max_retries: self.config.retry_config.max_attempts,
-            retry_delay_ms: self.config.retry_config.base_delay_ms,
-        }
-    }
 }
 
 /// Synchronous wrapper around AsyncNtfyClient for blocking operations
@@ -381,108 +332,46 @@ impl NtfyClient {
         }
     }
     
-    /// Create a new sync client with configuration
-    pub fn with_config(config: NtfyClientConfig) -> Result<Self> {
-        let async_client = AsyncNtfyClient::new(config)?;
-        Ok(Self::new(async_client))
+    /// Helper method to execute async code in blocking context with proper error handling
+    fn execute_in_runtime<F>(&self, f: F) -> Result<()>
+    where
+        F: std::future::Future<Output = Result<()>>,
+    {
+        // Use block_in_place if we're in a tokio runtime, otherwise create a new runtime
+        match tokio::runtime::Handle::try_current() {
+            Ok(handle) => {
+                tokio::task::block_in_place(|| {
+                    handle.block_on(f)
+                })
+            }
+            Err(_) => {
+                // Not in a tokio runtime, create a new one with proper error handling
+                let rt = tokio::runtime::Runtime::new()
+                    .context("Failed to create tokio runtime for sync operation")?;
+                rt.block_on(f)
+            }
+        }
     }
+    
     
     /// Send a notification (blocking)
     pub fn send(&self, message: &NtfyMessage) -> Result<()> {
-        // Use block_in_place if we're in a tokio runtime, otherwise create a new runtime
-        match tokio::runtime::Handle::try_current() {
-            Ok(handle) => {
-                tokio::task::block_in_place(|| {
-                    handle.block_on(self.inner.send(message))
-                })
-            }
-            Err(_) => {
-                // Not in a tokio runtime, create a new one
-                let rt = tokio::runtime::Runtime::new().expect("Failed to create runtime");
-                rt.block_on(self.inner.send(message))
-            }
-        }
+        self.execute_in_runtime(self.inner.send(message))
     }
     
-    /// Send a simple notification (blocking)
-    pub fn send_simple(&self, topic: &str, title: &str, message: &str, priority: u8) -> Result<()> {
-        // Use block_in_place if we're in a tokio runtime, otherwise create a new runtime
-        match tokio::runtime::Handle::try_current() {
-            Ok(handle) => {
-                tokio::task::block_in_place(|| {
-                    handle.block_on(self.inner.send_simple(topic, title, message, priority))
-                })
-            }
-            Err(_) => {
-                // Not in a tokio runtime, create a new one
-                let rt = tokio::runtime::Runtime::new().expect("Failed to create runtime");
-                rt.block_on(self.inner.send_simple(topic, title, message, priority))
-            }
-        }
-    }
-    
-    /// Validate configuration (blocking)
-    pub fn validate_config(&self) -> Result<()> {
-        // Use block_in_place if we're in a tokio runtime, otherwise create a new runtime
-        match tokio::runtime::Handle::try_current() {
-            Ok(handle) => {
-                tokio::task::block_in_place(|| {
-                    handle.block_on(self.inner.validate_config())
-                })
-            }
-            Err(_) => {
-                // Not in a tokio runtime, create a new one
-                let rt = tokio::runtime::Runtime::new().expect("Failed to create runtime");
-                rt.block_on(self.inner.validate_config())
-            }
-        }
-    }
-    
-    /// Perform health check (blocking)
-    pub fn health_check(&self) -> Result<()> {
-        // Use block_in_place if we're in a tokio runtime, otherwise create a new runtime
-        match tokio::runtime::Handle::try_current() {
-            Ok(handle) => {
-                tokio::task::block_in_place(|| {
-                    handle.block_on(self.inner.health_check())
-                })
-            }
-            Err(_) => {
-                // Not in a tokio runtime, create a new one
-                let rt = tokio::runtime::Runtime::new().expect("Failed to create runtime");
-                rt.block_on(self.inner.health_check())
-            }
-        }
-    }
-    
-    /// Get client statistics
-    pub fn get_stats(&self) -> ClientStats {
-        self.inner.get_stats()
-    }
-    
-    /// Get client configuration info
-    pub fn get_config_info(&self) -> ClientConfigInfo {
-        self.inner.get_config_info()
-    }
 }
 
 // Convert from config types (transitional compatibility)
-impl From<&crate::config::Config> for NtfyClientConfig {
-    fn from(config: &crate::config::Config) -> Self {
-        Self {
-            server_url: config.ntfy.server_url.clone(),
-            auth_token: config.ntfy.auth_token.clone(),
-            timeout_secs: config.ntfy.timeout_secs,
-            send_format: config.ntfy.send_format.clone(),
-            retry_config: RetryConfig::default(),
-            user_agent: Some("claude-ntfy/0.1.0".to_string()),
-        }
+impl From<&crate::shared::config::Config> for NtfyClientConfig {
+    fn from(config: &crate::shared::config::Config) -> Self {
+        // Delegate to the NtfyConfig implementation to avoid duplication
+        Self::from(&config.ntfy)
     }
 }
 
 // Convert directly from NtfyConfig
-impl From<&crate::config::NtfyConfig> for NtfyClientConfig {
-    fn from(config: &crate::config::NtfyConfig) -> Self {
+impl From<&crate::shared::config::NtfyConfig> for NtfyClientConfig {
+    fn from(config: &crate::shared::config::NtfyConfig) -> Self {
         Self {
             server_url: config.server_url.clone(),
             auth_token: config.auth_token.clone(),
@@ -494,7 +383,24 @@ impl From<&crate::config::NtfyConfig> for NtfyClientConfig {
     }
 }
 
-// Default implementation for NtfyMessage for convenience
+/// Create an async notification client from ntfy configuration
+pub fn create_async_client_from_ntfy_config(config: &crate::config::NtfyConfig) -> Result<AsyncNtfyClient> {
+    let client_config = NtfyClientConfig {
+        server_url: config.server_url.clone(),
+        auth_token: config.auth_token.clone(),
+        timeout_secs: config.timeout_secs,
+        send_format: config.send_format.clone(),
+        retry_config: RetryConfig::default(),
+        user_agent: Some("claude-ntfy/0.1.0".to_string()),
+    };
+    AsyncNtfyClient::new(client_config)
+}
+
+/// Create a sync notification client from ntfy configuration  
+pub fn create_sync_client_from_ntfy_config(config: &crate::config::NtfyConfig) -> Result<NtfyClient> {
+    let async_client = create_async_client_from_ntfy_config(config)?;
+    Ok(async_client.blocking())
+}
 
 #[cfg(test)]
 mod tests {
@@ -559,10 +465,10 @@ mod tests {
         assert_eq!(stats.average_latency_ms, 150);
         assert_eq!(stats.min_latency_ms, 100);
         assert_eq!(stats.max_latency_ms, 200);
-        assert_eq!(stats.success_rate(), 100.0);
         
         stats.record_failure("Test error".to_string());
         assert_eq!(stats.messages_failed, 1);
-        assert!(stats.success_rate() < 100.0);
+        // Test that we can track both successes and failures
+        assert!(stats.messages_sent > 0 && stats.messages_failed > 0);
     }
 }

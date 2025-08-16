@@ -6,7 +6,6 @@
 pub mod config;
 pub mod daemon;
 pub mod hooks;
-pub mod templates;
 pub mod errors;
 pub mod shared;
 pub mod ntfy;

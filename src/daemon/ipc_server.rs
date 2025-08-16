@@ -130,7 +130,7 @@ impl IpcServer {
             .context("Failed to read message payload")?;
 
         // Deserialize message
-        let message: DaemonMessage = bincode::deserialize(&message_buffer)
+        let (message, _): (DaemonMessage, usize) = bincode::serde::decode_from_slice(&message_buffer, bincode::config::standard())
             .context("Failed to deserialize message")?;
 
         debug!("Received IPC message: {:?}", message);
@@ -141,12 +141,12 @@ impl IpcServer {
                 // Increment queue size when task is queued
                 queue_size.fetch_add(1, Ordering::Relaxed);
                 
-                match task_sender.send_async(task).await {
+                match task_sender.send_async(*task).await {
                     Ok(()) => DaemonResponse::Ok,
                     Err(e) => {
                         // Decrement on failure
                         queue_size.fetch_sub(1, Ordering::Relaxed);
-                        DaemonResponse::Error(format!("Failed to queue task: {}", e))
+                        DaemonResponse::Error(format!("Failed to queue task: {e}"))
                     }
                 }
             }
@@ -182,7 +182,7 @@ impl IpcServer {
         };
 
         // Serialize and send response
-        let response_data = bincode::serialize(&response)
+        let response_data = bincode::serde::encode_to_vec(&response, bincode::config::standard())
             .context("Failed to serialize response")?;
 
         let response_length = response_data.len() as u32;

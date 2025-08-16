@@ -9,9 +9,6 @@ pub mod context;
 pub use types::{AppError, AppResult};
 pub use context::ErrorContextExt;
 
-/// Convenience type alias for Results using AppError
-#[allow(dead_code)]
-pub type Result<T> = std::result::Result<T, AppError>;
 
 /// Convert from anyhow::Error to AppError for migration compatibility
 impl From<anyhow::Error> for AppError {
@@ -36,7 +33,7 @@ mod tests {
             AppError::Other { message, .. } => {
                 assert_eq!(message, "test error");
             },
-            _ => panic!("Wrong error type"),
+            _ => assert!(false, "Expected AppError::Other, got {:?}", app_err),
         }
     }
 }

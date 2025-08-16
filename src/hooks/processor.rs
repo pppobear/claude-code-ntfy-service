@@ -54,19 +54,6 @@ impl DefaultHookProcessor {
         }
     }
     
-    /// Create a new DefaultHookProcessor with custom configuration
-    #[allow(dead_code)]
-    pub fn with_config(
-        enhancer: impl HookDataEnhancer + 'static,
-        validator: impl HookValidator + 'static,
-        config: HookConfig,
-    ) -> Self {
-        Self {
-            enhancer: Arc::new(enhancer),
-            validator: Arc::new(validator),
-            config,
-        }
-    }
     
     /// Check if the hook should be processed based on configuration
     fn should_process_hook(&self, hook_name: &str) -> bool {
@@ -285,7 +272,7 @@ mod tests {
         
         for hook_type in hook_types {
             let result = processor.process(hook_type, json!({"test": "data"}));
-            assert!(result.is_ok(), "Failed to process hook type: {}", hook_type);
+            assert!(result.is_ok(), "Failed to process hook type: {hook_type}");
             
             let processed = result.unwrap();
             assert_eq!(processed.hook_name, hook_type);
@@ -296,11 +283,7 @@ mod tests {
     struct FailingEnhancer;
     impl HookDataEnhancer for FailingEnhancer {
         fn enhance(&self, _hook_name: &str, _data: Value) -> AppResult<Value> {
-            Err(AppError::HookProcessing {
-                hook_name: "test".to_string(),
-                message: "Enhancement failed".to_string(),
-                source: None,
-            })
+            Err(AppError::ValidationError("Enhancement failed".to_string()))
         }
     }
 
